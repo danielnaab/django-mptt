@@ -1,3 +1,7 @@
+This is a branch of django-mptt which is attempting to allow MPTTModels to
+belong to multiple trees.  Work is in-progress and currently
+backwards-compatible with upstream, but not functional otherwise.
+
 ===========
 django-mptt
 ===========
