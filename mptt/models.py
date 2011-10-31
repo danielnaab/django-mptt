@@ -79,7 +79,7 @@ class MPTTOptions(object):
         field = instance._meta.get_field(field_name)
         setattr(instance, field.attname, value)
 
-    def update_mptt_cached_fields(self, instance):
+    def update_mptt_cached_fields(self, instance, prefix=None):
         """
         Caches (in an instance._mptt_cached_fields dict) the original values of:
          - parent pk
@@ -89,7 +89,7 @@ class MPTTOptions(object):
         so that the MPTT fields need to be updated.
         """
         instance._mptt_cached_fields = {}
-        field_names = [self.parent_attr]
+        field_names = [self.get_parent_attr(prefix=prefix)]
         if self.order_insertion_by:
             field_names += self.order_insertion_by
         for field_name in field_names:
@@ -119,7 +119,7 @@ class MPTTOptions(object):
             fields.append((field, value))
         return reduce(operator.or_, filters)
 
-    def get_ordered_insertion_target(self, node, parent):
+    def get_ordered_insertion_target(self, node, parent, prefix=None):
         """
         Attempts to retrieve a suitable right sibling for ``node``
         underneath ``parent`` (which may be ``None`` in the case of root
@@ -136,15 +136,15 @@ class MPTTOptions(object):
             order_by = opts.order_insertion_by[:]
             filters = self.insertion_target_filters(node, order_by)
             if parent:
-                filters = filters & Q(**{opts.parent_attr: parent})
+                filters = filters & Q(**{opts.get_parent_attr(prefix=prefix): parent})
                 # Fall back on tree ordering if multiple child nodes have
                 # the same values.
-                order_by.append(opts.left_attr)
+                order_by.append(opts.get_left_attr(prefix=prefix))
             else:
-                filters = filters & Q(**{'%s__isnull' % opts.parent_attr: True})
+                filters = filters & Q(**{'%s__isnull' % opts.get_parent_attr(prefix=prefix): True})
                 # Fall back on tree id ordering if multiple root nodes have
                 # the same values.
-                order_by.append(opts.tree_id_attr)
+                order_by.append(opts.get_tree_id_attr(prefix=prefix))
             queryset = node.__class__._tree_manager.filter(filters).order_by(*order_by)
             if node.pk:
                 queryset = queryset.exclude(pk=node.pk)
@@ -155,6 +155,20 @@ class MPTTOptions(object):
                 pass
         return right_sibling
 
+    def get_parent_attr(self, prefix=None):
+        return self.parent_attr
+
+    def get_left_attr(self, prefix=None):
+        return self.left_attr
+
+    def get_right_attr(self, prefix=None):
+        return self.right_attr
+
+    def get_tree_id_attr(self, prefix=None):
+        return self.tree_id_attr
+
+    def get_level_attr(self, prefix=None):
+        return self.level_attr
 
 class MPTTModelBase(ModelBase):
     """
@@ -304,7 +318,7 @@ class MPTTModel(models.Model):
         translated_fieldname = getattr(self._mptt_meta, '%s_attr' % fieldname)
         return getattr(self, translated_fieldname)
 
-    def get_ancestors(self, ascending=False, include_self=False):
+    def get_ancestors(self, ascending=False, include_self=False, prefix=None):
         """
         Creates a ``QuerySet`` containing the ancestors of this model
         instance.
@@ -326,12 +340,12 @@ class MPTTModel(models.Model):
 
         opts = self._mptt_meta
 
-        order_by = opts.left_attr
+        order_by = opts.get_left_attr(prefix=prefix)
         if ascending:
             order_by = '-%s' % order_by
 
-        left = getattr(self, opts.left_attr)
-        right = getattr(self, opts.right_attr)
+        left = getattr(self, opts.get_left_attr(prefix=prefix))
+        right = getattr(self, opts.get_right_attr(prefix=prefix))
 
         if not include_self:
             left -= 1
@@ -367,7 +381,7 @@ class MPTTModel(models.Model):
 
             return self._tree_manager._mptt_filter(parent=self)
 
-    def get_descendants(self, include_self=False):
+    def get_descendants(self, include_self=False, prefix=None):
         """
         Creates a ``QuerySet`` containing descendants of this model
         instance, in tree order.
@@ -382,8 +396,8 @@ class MPTTModel(models.Model):
                 return self._tree_manager.filter(pk=self.pk)
 
         opts = self._mptt_meta
-        left = getattr(self, opts.left_attr)
-        right = getattr(self, opts.right_attr)
+        left = getattr(self, opts.get_left_attr(prefix=prefix))
+        right = getattr(self, opts.get_right_attr(prefix=prefix))
 
         if not include_self:
             left += 1
@@ -405,7 +419,7 @@ class MPTTModel(models.Model):
         else:
             return (self._mpttfield('right') - self._mpttfield('left') - 1) / 2
 
-    def get_leafnodes(self, include_self=False):
+    def get_leafnodes(self, include_self=False, prefix=None):
         """
         Creates a ``QuerySet`` containing leafnodes of this model
         instance, in tree order.
@@ -416,10 +430,10 @@ class MPTTModel(models.Model):
         descendants = self.get_descendants(include_self=include_self)
 
         return self._tree_manager._mptt_filter(descendants,
-            left=(models.F(self._mptt_meta.right_attr) - 1)
+            left=(models.F(self._mptt_meta.get_right_attr(prefix=prefix)) - 1)
         )
 
-    def get_next_sibling(self, **filters):
+    def get_next_sibling(self, prefix=None, **filters):
         """
         Returns this model instance's next sibling in the tree, or
         ``None`` if it doesn't have a next sibling.
@@ -432,14 +446,15 @@ class MPTTModel(models.Model):
             )
         else:
             qs = self._tree_manager._mptt_filter(qs,
-                parent__id=getattr(self, '%s_id' % self._mptt_meta.parent_attr),
+                parent__id=getattr(self, '%s_id' %
+                    self._mptt_meta.get_parent_attr(prefix=prefix)),
                 left__gt=self._mpttfield('right'),
             )
 
         siblings = qs[:1]
         return siblings and siblings[0] or None
 
-    def get_previous_sibling(self, **filters):
+    def get_previous_sibling(self, prefix=None, **filters):
         """
         Returns this model instance's previous sibling in the tree, or
         ``None`` if it doesn't have a previous sibling.
@@ -451,13 +466,14 @@ class MPTTModel(models.Model):
                 parent__isnull=True,
                 tree_id__lt=self._mpttfield('tree_id'),
             )
-            qs = qs.order_by('-%s' % opts.tree_id_attr)
+            qs = qs.order_by('-%s' % opts.get_tree_id_attr(prefix=prefix))
         else:
             qs = self._tree_manager._mptt_filter(qs,
-                parent__id=getattr(self, '%s_id' % opts.parent_attr),
+                parent__id=getattr(self, '%s_id' %
+                    opts.get_parent_attr(prefix=prefix)),
                 right__lt=self._mpttfield('left'),
             )
-            qs = qs.order_by('-%s' % opts.right_attr)
+            qs = qs.order_by('-%s' % opts.get_right_attr(prefix=prefix))
 
         siblings = qs[:1]
         return siblings and siblings[0] or None
@@ -474,7 +490,7 @@ class MPTTModel(models.Model):
             parent__isnull=True
         ).get()
 
-    def get_siblings(self, include_self=False):
+    def get_siblings(self, include_self=False, prefix=None):
         """
         Creates a ``QuerySet`` containing siblings of this model
         instance. Root nodes are considered to be siblings of other root
@@ -486,17 +502,18 @@ class MPTTModel(models.Model):
         if self.is_root_node():
             queryset = self._tree_manager._mptt_filter(parent__isnull=True)
         else:
-            parent_id = getattr(self, '%s_id' % self._mptt_meta.parent_attr)
+            parent_id = getattr(self, '%s_id' %
+                self._mptt_meta.get_parent_attr(prefix=prefix))
             queryset = self._tree_manager._mptt_filter(parent__id=parent_id)
         if not include_self:
             queryset = queryset.exclude(pk=self.pk)
         return queryset
 
-    def get_level(self):
+    def get_level(self, prefix=None):
         """
         Returns the level of this node (distance from root)
         """
-        return getattr(self, self._mptt_meta.level_attr)
+        return getattr(self, self._mptt_meta.get_level_attr(prefix=prefix))
 
     def insert_at(self, target, position='first-child', save=False, allow_existing_pk=False):
         """
@@ -519,14 +536,15 @@ class MPTTModel(models.Model):
         """
         return not self.get_descendant_count()
 
-    def is_root_node(self):
+    def is_root_node(self, prefix=None):
         """
         Returns ``True`` if this model instance is a root node,
         ``False`` otherwise.
         """
-        return getattr(self, '%s_id' % self._mptt_meta.parent_attr) is None
+        return getattr(self, '%s_id' %
+            self._mptt_meta.get_parent_attr(prefix=prefix)) is None
 
-    def is_descendant_of(self, other, include_self=False):
+    def is_descendant_of(self, other, include_self=False, prefix=None):
         """
         Returns ``True`` if this model is a descendant of the given node,
         ``False`` otherwise.
@@ -537,13 +555,15 @@ class MPTTModel(models.Model):
         if include_self and other.pk == self.pk:
             return True
 
-        if getattr(self, opts.tree_id_attr) != getattr(other, opts.tree_id_attr):
+        if getattr(self, opts.get_tree_id_attr(prefix=prefix)) != \
+                getattr(other, opts.get_tree_id_attr(prefix=prefix)):
             return False
         else:
-            left = getattr(self, opts.left_attr)
-            right = getattr(self, opts.right_attr)
+            left = getattr(self, opts.get_left_attr(prefix=prefix))
+            right = getattr(self, opts.get_right_attr(prefix=prefix))
 
-            return left > getattr(other, opts.left_attr) and right < getattr(other, opts.right_attr)
+            return (left > getattr(other, opts.get_left_attr(prefix=prefix))
+                and right < getattr(other, opts.get_right_attr(prefix=prefix)))
 
     def is_ancestor_of(self, other, include_self=False):
         """
