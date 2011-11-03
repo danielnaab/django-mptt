@@ -36,13 +36,13 @@ class MPTTOptions(object):
 
     def __init__(self, opts=None, **kwargs):
         # Override defaults with options provided
-        opts = opts.__dict__.copy()
-        opts.update(**kwargs)
+        my_opts = opts.__dict__.copy()
+        my_opts.update(**kwargs)
 
-        # Init parent dict
-        if not opts.has_key('parents'):
-            opts['parents'] = self.__class__.parents.copy()
-        parents = opts['parents']
+        # Init my_opts dict
+        if not my_opts.has_key('parents'):
+            my_opts['parents'] = self.__class__.parents.copy()
+        parents = my_opts['parents']
 
         # Put old-style kwargs in opts.
         # TODO: probably want to allow only one field in the dict to be
@@ -50,10 +50,10 @@ class MPTTOptions(object):
         if len(parents) == 1 and parents.has_key(None):
             for name in ('order_insertion_by', 'left_attr', 'right_attr',
                     'tree_id_attr', 'level_attr', 'parent_attr'):
-                value = getattr(parents[None], name, None)
+                value = getattr(opts, name, None)
                 if not value:
                     value = self.__class__.parents[None].get(name)
-                opts[name] = value
+                my_opts[name] = value
 
         if 'tree_manager_attr' in [key for key in parents.iterkeys()]:
             warnings.warn(
@@ -63,7 +63,7 @@ class MPTTOptions(object):
             )
 
         # Populate opts on self
-        for key, value in opts.iteritems():
+        for key, value in my_opts.iteritems():
             setattr(self, key, value)
 
         # Normalize order_insertion_by to a list
