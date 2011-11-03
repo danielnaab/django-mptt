@@ -44,9 +44,15 @@ class MPTTOptions(object):
             my_opts['parents'] = self.__class__.parents.copy()
         else:
             # Update each parent opts with defaults
-            for parent in my_opts['parents'].itervalues():
+            for prefix, parent_dict in my_opts['parents'].iteritems():
                 for name, value in  self.__class__.parents[None].iteritems():
-                    parent.setdefault(name, value)
+                    if prefix and name in ('left_attr', 'right_attr',
+                            'tree_id_attr', 'level_attr', 'parent_attr'):
+                        parent_dict.setdefault(name,
+                            '%s_%s' % (prefix, name)
+                        )
+                    else:
+                        parent_dict.setdefault(name, value)
         parents = my_opts['parents']
 
         # Pull old-style kwargs from opts.
@@ -57,16 +63,11 @@ class MPTTOptions(object):
                 if value is not None:
                     parents[None][name] = value
 
-        for prefix, parent_dict in parents.iteritems():
+        # Copy these opts to the root to support old-style attrs.
+        if len(parents) == 1 and parents.has_key(None):
             for name in ('order_insertion_by', 'left_attr', 'right_attr',
                     'tree_id_attr', 'level_attr', 'parent_attr'):
-                parent_dict.setdefault(name,
-                    '%s_%s' % (prefix, self.__class__.parents[None][name])
-                )
-
-            # Copy these opts to the root to support old-style attrs.
-            if prefix is None and len(parents) == 1:
-                my_opts.update(parent_dict)
+                my_opts.update(parents[None])
 
         if 'tree_manager_attr' in [key for key in [
                 value.iterkeys() for value in parents.itervalues()]]:
@@ -188,6 +189,28 @@ class MPTTOptions(object):
                 pass
         return right_sibling
 
+    def _get_parent_dict(self, prefix):
+        parent_dict = self.parents.get(prefix, None)
+        if not parent_dict:
+            raise ValueError, 'Unknown prefix `%s`.' % prefix
+        return parent_dict
+
+    def get_parent_attr(self, prefix=None):
+        return self._get_parent_dict(prefix)['parent_attr']
+
+    def get_left_attr(self, prefix=None):
+        return self._get_parent_dict(prefix)['left_attr']
+
+    def get_right_attr(self, prefix=None):
+        return self._get_parent_dict(prefix)['right_attr']
+
+    def get_tree_id_attr(self, prefix=None):
+        return self._get_parent_dict(prefix)['tree_id_attr']
+
+    def get_level_attr(self, prefix=None):
+        return self._get_parent_dict(prefix)['level_attr']
+
+    # redefine old versions for now
     def get_parent_attr(self, prefix=None):
         return self.parent_attr
 
