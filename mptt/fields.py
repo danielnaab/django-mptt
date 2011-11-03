@@ -16,6 +16,9 @@ class TreeForeignKey(models.ForeignKey):
     This is useful if you are creating models that need automatically
     generated ModelForms to use the correct widgets.
     """
+    def __init__(self, *args, **kwargs):
+        self.prefix = kwargs.pop('prefix', None)
+        super(self, TreeForeignKey).__init__(*args, **kwargs)
 
     def formfield(self, **kwargs):
         """
