@@ -18,7 +18,7 @@ class TreeForeignKey(models.ForeignKey):
     """
     def __init__(self, *args, **kwargs):
         self.prefix = kwargs.pop('prefix', None)
-        super(self, TreeForeignKey).__init__(*args, **kwargs)
+        super(TreeForeignKey, self).__init__(*args, **kwargs)
 
     def formfield(self, **kwargs):
         """
