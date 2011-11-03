@@ -20,41 +20,61 @@ class MPTTOptions(object):
                 order_insertion_by = ['name']
                 parent_attr = 'myparent'
     """
-
-    order_insertion_by = []
-    left_attr = 'lft'
-    right_attr = 'rght'
-    tree_id_attr = 'tree_id'
-    level_attr = 'level'
-    parent_attr = 'parent'
+    parents = {
+        None: {
+            'order_insertion_by': [],
+            'left_attr': 'lft',
+            'right_attr': 'rght',
+            'tree_id_attr': 'tree_id',
+            'level_attr': 'level',
+            'parent_attr': 'parent',
+        }
+    }
 
     # deprecated, don't use this
     tree_manager_attr = 'tree'
 
     def __init__(self, opts=None, **kwargs):
         # Override defaults with options provided
-        if opts:
-            opts = opts.__dict__.items()
-        else:
-            opts = []
-        opts.extend(kwargs.items())
+        opts = opts.__dict__.copy()
+        opts.update(**kwargs)
 
-        if 'tree_manager_attr' in [opt[0] for opt in opts]:
+        # Init parent dict
+        if not opts.has_key('parents'):
+            opts['parents'] = self.__class__.parents.copy()
+        parents = opts['parents']
+
+        # Put old-style kwargs in opts.
+        # TODO: probably want to allow only one field in the dict to be
+        # overridden.
+        if len(parents) == 1 and parents.has_key(None):
+            for name in ('order_insertion_by', 'left_attr', 'right_attr',
+                    'tree_id_attr', 'level_attr', 'parent_attr'):
+                value = getattr(parents[None], name, None)
+                if not value:
+                    value = self.__class__.parents[None].get(name)
+                opts[name] = value
+
+        if 'tree_manager_attr' in [key for key in parents.iterkeys()]:
             warnings.warn(
-                _("`tree_manager_attr` is deprecated; just instantiate a TreeManager as a normal manager on your model"),
+                _("`tree_manager_attr` is deprecated; just instantiate a "
+                    "TreeManager as a normal manager on your model"),
                 DeprecationWarning
             )
 
-        for key, value in opts:
+        # Populate opts on self
+        for key, value in opts.iteritems():
             setattr(self, key, value)
 
         # Normalize order_insertion_by to a list
-        if isinstance(self.order_insertion_by, basestring):
-            self.order_insertion_by = [self.order_insertion_by]
-        elif isinstance(self.order_insertion_by, tuple):
-            self.order_insertion_by = list(self.order_insertion_by)
-        elif self.order_insertion_by is None:
-            self.order_insertion_by = []
+        for parent in parents.itervalues():
+            if isinstance(parent['order_insertion_by'], basestring):
+                parent['order_insertion_by'] = [parent['order_insertion_by']]
+            elif isinstance(parent['order_insertion_by'], tuple):
+                parent['order_insertion_by'] = list(
+                    parent['order_insertion_by'])
+            elif parent['order_insertion_by'] is None:
+                parent['order_insertion_by'] = []
 
     def __iter__(self):
         return iter([(k, v) for (k, v) in self.__dict__.items() if not k.startswith('_')])
@@ -239,7 +259,8 @@ class MPTTModelBase(ModelBase):
                 bases.insert(0, MPTTModel)
                 cls.__bases__ = tuple(bases)
 
-            for key in ('left_attr', 'right_attr', 'tree_id_attr', 'level_attr'):
+            for key in (
+                    'left_attr', 'right_attr', 'tree_id_attr', 'level_attr'):
                 field_name = getattr(cls._mptt_meta, key)
                 try:
                     cls._meta.get_field(field_name)
