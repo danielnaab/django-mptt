@@ -622,25 +622,7 @@ class MPTTModel(models.Model):
                 self._mptt_saved = _exists(manager.filter(pk=self.pk))
             return self._mptt_saved
 
-    def save(self, *args, **kwargs):
-        """
-        If this is a new node, sets tree fields up before it is inserted
-        into the database, making room in the tree structure as neccessary,
-        defaulting to making the new node the last child of its parent.
-
-        It the node's left and right edge indicators already been set, we
-        take this as indication that the node has already been set up for
-        insertion, so its tree fields are left untouched.
-
-        If this is an existing node and its parent has been changed,
-        performs reparenting in the tree structure, defaulting to making the
-        node the last child of its new parent.
-
-        In either case, if the node's class has its ``order_insertion_by``
-        tree option set, the node will be inserted or moved to the
-        appropriate position to maintain ordering by the specified field.
-        """
-        opts = self._mptt_meta
+    def _save_parent(self, opts, **kwargs):
         parent_id = opts.get_raw_field_value(self, opts.parent_attr)
 
         # determine whether this instance is already in the db
@@ -704,6 +686,29 @@ class MPTTModel(models.Model):
                 else:
                     # Default insertion
                     self.insert_at(parent, position='last-child', allow_existing_pk=True)
+
+    def save(self, *args, **kwargs):
+        """
+        If this is a new node, sets tree fields up before it is inserted
+        into the database, making room in the tree structure as neccessary,
+        defaulting to making the new node the last child of its parent.
+
+        It the node's left and right edge indicators already been set, we
+        take this as indication that the node has already been set up for
+        insertion, so its tree fields are left untouched.
+
+        If this is an existing node and its parent has been changed,
+        performs reparenting in the tree structure, defaulting to making the
+        node the last child of its new parent.
+
+        In either case, if the node's class has its ``order_insertion_by``
+        tree option set, the node will be inserted or moved to the
+        appropriate position to maintain ordering by the specified field.
+        """
+        for opts in self._mptt_meta.parents.itervalues():
+            opts = self._mptt_meta
+            self._save_parent(opts, **kwargs)
+
         super(MPTTModel, self).save(*args, **kwargs)
         self._mptt_saved = True
         opts.update_mptt_cached_fields(self)
