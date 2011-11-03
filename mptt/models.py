@@ -42,20 +42,34 @@ class MPTTOptions(object):
         # Init my_opts dict
         if not my_opts.has_key('parents'):
             my_opts['parents'] = self.__class__.parents.copy()
+        else:
+            # Update each parent opts with defaults
+            for parent in my_opts['parents'].itervalues():
+                for name, value in  self.__class__.parents[None].iteritems():
+                    parent.setdefault(name, value)
         parents = my_opts['parents']
 
-        # Put old-style kwargs in opts.
-        # TODO: probably want to allow only one field in the dict to be
-        # overridden.
+        # Pull old-style kwargs from opts.
         if len(parents) == 1 and parents.has_key(None):
             for name in ('order_insertion_by', 'left_attr', 'right_attr',
                     'tree_id_attr', 'level_attr', 'parent_attr'):
                 value = getattr(opts, name, None)
-                if not value:
-                    value = self.__class__.parents[None].get(name)
-                my_opts[name] = value
+                if value is not None:
+                    parents[None][name] = value
 
-        if 'tree_manager_attr' in [key for key in parents.iterkeys()]:
+        for prefix, parent_dict in parents.iteritems():
+            for name in ('order_insertion_by', 'left_attr', 'right_attr',
+                    'tree_id_attr', 'level_attr', 'parent_attr'):
+                parent_dict.setdefault(name,
+                    '%s_%s' % (prefix, self.__class__.parents[None][name])
+                )
+
+            # Copy these opts to the root to support old-style attrs.
+            if prefix is None and len(parents) == 1:
+                my_opts.update(parent_dict)
+
+        if 'tree_manager_attr' in [key for key in [
+                value.iterkeys() for value in parents.itervalues()]]:
             warnings.warn(
                 _("`tree_manager_attr` is deprecated; just instantiate a "
                     "TreeManager as a normal manager on your model"),
@@ -63,8 +77,7 @@ class MPTTOptions(object):
             )
 
         # Populate opts on self
-        for key, value in my_opts.iteritems():
-            setattr(self, key, value)
+        self.__dict__.update(my_opts)
 
         # Normalize order_insertion_by to a list
         for parent in parents.itervalues():
