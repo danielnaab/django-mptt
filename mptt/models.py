@@ -295,14 +295,15 @@ class MPTTModelBase(ModelBase):
                 bases.insert(0, MPTTModel)
                 cls.__bases__ = tuple(bases)
 
-            for key in (
-                    'left_attr', 'right_attr', 'tree_id_attr', 'level_attr'):
-                field_name = getattr(cls._mptt_meta, key)
-                try:
-                    cls._meta.get_field(field_name)
-                except models.FieldDoesNotExist:
-                    field = models.PositiveIntegerField(db_index=True, editable=False)
-                    field.contribute_to_class(cls, field_name)
+            for parent_dict in cls._mptt_meta.__dict__['parents'].itervalues():
+                for key in (
+                        'left_attr', 'right_attr', 'tree_id_attr', 'level_attr'):
+                    field_name = parent_dict[key]
+                    try:
+                        cls._meta.get_field(field_name)
+                    except models.FieldDoesNotExist:
+                        field = models.PositiveIntegerField(db_index=True, editable=False)
+                        field.contribute_to_class(cls, field_name)
 
             # Add a tree manager, if there isn't one already
             if not abstract:

@@ -53,7 +53,7 @@ class TreeManager(models.Manager):
         """
 
         # Avoid calling "get_field_by_name()", which populates the related
-        # models cache and can cause circular imports in complex projects.
+        # model's cache and can cause circular imports in complex projects.
         # Instead, find the tree_id field using "get_fields_with_model()".
         [tree_field] = [fld for fld in model._meta.get_fields_with_model()
             if fld[0].name == self.get_tree_id_attr(prefix=prefix)]
