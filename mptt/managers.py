@@ -58,11 +58,16 @@ class TreeManager(models.Manager):
         [tree_field] = [fld for fld in model._meta.get_fields_with_model()
             if fld[0].name == self.get_tree_id_attr(prefix=prefix)]
         if tree_field[1]:
+            # tree_model is the model that contains the tree fields.
+            # this is usually just the same as model, but not for derived models.
             self.tree_model = tree_field[1]
-            self._base_manager = self.tree_model._tree_manager
         else:
             self.tree_model = model
-            self._base_manager = None
+
+        self._base_manager = None
+        if self.tree_model is not model:
+            # _base_manager is the treemanager on tree_model
+            self._base_manager = self.tree_model._tree_manager
 
     def get_parent_attr(self, prefix=None):
         return self.model._mptt_meta.get_parent_attr(prefix=prefix)

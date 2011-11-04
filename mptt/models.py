@@ -273,6 +273,32 @@ class MPTTModelBase(ModelBase):
 
         abstract = getattr(cls._meta, 'abstract', False)
 
+        # For backwards compatibility with existing libraries, we copy the
+        # _mptt_meta options into _meta.
+        # This was removed in 0.5 but added back in 0.5.1 since it caused compatibility
+        # issues with django-cms 2.2.0.
+        # some discussion is here: https://github.com/divio/django-cms/issues/1079
+        # This stuff is still documented as removed, and WILL be removed again in the next release.
+        # All new code should use _mptt_meta rather than _meta for tree attributes.
+        attrs = set(['left_attr', 'right_attr', 'tree_id_attr', 'level_attr', 'parent_attr',
+                    'tree_manager_attr', 'order_insertion_by'])
+        warned_attrs = set()
+
+        class _MetaSubClass(cls._meta.__class__):
+            def __getattr__(self, attr):
+                if attr in attrs:
+                    if attr not in warned_attrs:
+                        warnings.warn(
+                            "%s._meta.%s is deprecated and will be removed in mptt 0.6"
+                            % (cls.__name__, attr),
+                            #don't use DeprecationWarning, that gets ignored by default
+                            UserWarning,
+                        )
+                        warned_attrs.add(attr)
+                    return getattr(cls._mptt_meta, attr)
+                return super(_MetaSubClass, self).__getattr__(attr)
+        cls._meta.__class__ = _MetaSubClass
+
         try:
             MPTTModel
         except NameError:
@@ -311,17 +337,20 @@ class MPTTModelBase(ModelBase):
                 if manager is None:
                     manager = cls._default_manager._copy_to_model(cls)
                     manager.contribute_to_class(cls, 'objects')
+                elif manager.model != cls:
+                    # manager was inherited
+                    manager = manager._copy_to_model(cls)
+                    manager.contribute_to_class(cls, 'objects')
                 if hasattr(manager, 'init_from_model'):
                     manager.init_from_model(cls)
 
                 # make sure we have a tree manager somewhere
-                if not isinstance(manager, TreeManager):
-                    manager = TreeManager()
-                    manager.contribute_to_class(cls, '_tree_manager')
-                    manager.init_from_model(cls)
+                tree_manager = TreeManager()
+                tree_manager.contribute_to_class(cls, '_tree_manager')
+                tree_manager.init_from_model(cls)
 
                 # avoid using ManagerDescriptor, so instances can refer to self._tree_manager
-                setattr(cls, '_tree_manager', manager)
+                setattr(cls, '_tree_manager', tree_manager)
 
                 # for backwards compatibility, add .tree too (or whatever's in tree_manager_attr)
                 tree_manager_attr = cls._mptt_meta.tree_manager_attr
