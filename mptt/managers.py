@@ -237,7 +237,7 @@ class TreeManager(models.Manager):
                 prefix=prefix), self._get_next_tree_id(prefix=prefix))
             setattr(node, self.get_parent_attr(
                 prefix=prefix), None)
-        elif target.is_root_node() and position in ['left', 'right']:
+        elif target.is_root_node(prefix=prefix) and position in ['left', 'right']:
             target_tree_id = getattr(target, self.get_tree_id_attr(prefix=prefix))
             if position == 'left':
                 tree_id = target_tree_id
@@ -319,13 +319,13 @@ class TreeManager(models.Manager):
                 position=position, prefix=prefix)
 
         if target is None:
-            if node.is_child_node():
+            if node.is_child_node(prefix=prefix):
                 self._make_child_root_node(node, prefix=prefix)
-        elif target.is_root_node() and position in ['left', 'right']:
+        elif target.is_root_node(prefix=prefix) and position in ['left', 'right']:
             self._make_sibling_of_root_node(node, target, position,
                 prefix=prefix)
         else:
-            if node.is_root_node():
+            if node.is_root_node(prefix=prefix):
                 self._move_root_node(node, target, position)
             else:
                 self._move_child_node(node, target, position)
@@ -597,7 +597,7 @@ class TreeManager(models.Manager):
         tree_id = getattr(node, self.get_tree_id_attr(prefix=prefix))
         target_tree_id = getattr(target, self.get_tree_id_attr(prefix=prefix))
 
-        if node.is_child_node():
+        if node.is_child_node(prefix=prefix):
             if position == 'left':
                 space_target = target_tree_id - 1
                 new_tree_id = target_tree_id

@@ -20,6 +20,7 @@ class MPTTOptions(object):
                 order_insertion_by = ['name']
                 parent_attr = 'myparent'
     """
+
     parents = {
         None: {
             'order_insertion_by': [],
@@ -36,62 +37,67 @@ class MPTTOptions(object):
 
     def __init__(self, opts=None, **kwargs):
         # Override defaults with options provided
-        my_opts = opts.__dict__.copy()
-        my_opts.update(**kwargs)
-
-        # Init my_opts dict
-        if not my_opts.has_key('parents'):
-            my_opts['parents'] = self.__class__.parents.copy()
+        if opts:
+            opts = opts.__dict__.copy()
         else:
-            # Update each parent opts with defaults
-            for prefix, parent_dict in my_opts['parents'].iteritems():
-                for name, value in  self.__class__.parents[None].iteritems():
-                    if prefix and name in ('left_attr', 'right_attr',
-                            'tree_id_attr', 'level_attr', 'parent_attr'):
-                        parent_dict.setdefault(name,
-                            '%s_%s' % (prefix, name)
-                        )
-                    else:
-                        parent_dict.setdefault(name, value)
-        parents = my_opts['parents']
+            opts = {}
+        opts.update(kwargs)
 
-        # Pull old-style kwargs from opts.
-        if len(parents) == 1 and parents.has_key(None):
-            for name in ('order_insertion_by', 'left_attr', 'right_attr',
-                    'tree_id_attr', 'level_attr', 'parent_attr'):
-                value = getattr(opts, name, None)
-                if value is not None:
-                    parents[None][name] = value
-
-        # Copy these opts to the root to support old-style attrs.
-        if len(parents) == 1 and parents.has_key(None):
-            for name in ('order_insertion_by', 'left_attr', 'right_attr',
-                    'tree_id_attr', 'level_attr', 'parent_attr'):
-                my_opts.update(parents[None])
-
-        if 'tree_manager_attr' in [key for key in [
-                value.iterkeys() for value in parents.itervalues()]]:
+        if 'tree_manager_attr' in opts.iterkeys():
             warnings.warn(
-                _("`tree_manager_attr` is deprecated; just instantiate a "
-                    "TreeManager as a normal manager on your model"),
+                _("`tree_manager_attr` is deprecated; just instantiate a TreeManager as a normal manager on your model"),
                 DeprecationWarning
             )
 
-        # Populate opts on self
-        self.__dict__.update(my_opts)
+        # Initialize parents dict
+        if not opts.has_key('parents'):
+            opts['parents'] = {}
+        if len(opts['parents']) == 0:
+            opts['parents'][None] = {}
 
-        # Normalize order_insertion_by to a list
-        for parent in parents.itervalues():
-            if isinstance(parent['order_insertion_by'], basestring):
-                parent['order_insertion_by'] = [parent['order_insertion_by']]
-            elif isinstance(parent['order_insertion_by'], tuple):
-                parent['order_insertion_by'] = list(
-                    parent['order_insertion_by'])
-            elif parent['order_insertion_by'] is None:
-                parent['order_insertion_by'] = []
+        # If there is one parent, move the old-style attrs to that parent.
+        if len(opts['parents']) == 1:
+            parent_dict = opts['parents'].values()[0]
+            for name in ('left_attr', 'order_insertion_by',
+                    'right_attr', 'tree_id_attr', 'level_attr', 'parent_attr'):
+                if opts.has_key(name):
+                    parent_dict[name] = opts.pop(name)
+                else:
+                    parent_dict.setdefault(name, self.__class__.parents[None][name])
+
+                # Normalize order_insertion_by to a list
+                if name == 'order_insertion_by':
+                    if isinstance(parent_dict[name], basestring):
+                        parent_dict[name] = [parent_dict[name]]
+                    elif isinstance(parent_dict[name], tuple):
+                        parent_dict[name] = list(parent_dict[name])
+                    elif parent_dict[name] is None:
+                        parent_dict[name] = []
+
+        # Update self with new opts
+        self.__dict__.update(opts)
 
     def __iter__(self):
         return iter([(k, v) for (k, v) in self.__dict__.items() if not k.startswith('_')])
+
+    @property
+    def order_insertion_by(self):
+        return self.get_parent_attr(prefix=None)
+    @property
+    def left_attr(self):
+        return self.get_left_attr(prefix=None)
+    @property
+    def right_attr(self):
+        return self.get_right_attr(prefix=None)
+    @property
+    def tree_id_attr(self):
+        return self.get_tree_id_attr(prefix=None)
+    @property
+    def level_attr(self):
+        return self.get_level_attr(prefix=None)
+    @property
+    def parent_attr(self):
+        return self.get_parent_attr(prefix=None)
 
     # Helper methods for accessing tree attributes on models.
     def get_raw_field_value(self, instance, field_name):
@@ -210,22 +216,6 @@ class MPTTOptions(object):
     def get_level_attr(self, prefix=None):
         return self._get_parent_dict(prefix)['level_attr']
 
-    # redefine old versions for now
-    def get_parent_attr(self, prefix=None):
-        return self.parent_attr
-
-    def get_left_attr(self, prefix=None):
-        return self.left_attr
-
-    def get_right_attr(self, prefix=None):
-        return self.right_attr
-
-    def get_tree_id_attr(self, prefix=None):
-        return self.tree_id_attr
-
-    def get_level_attr(self, prefix=None):
-        return self.level_attr
-
 class MPTTModelBase(ModelBase):
     """
     Metaclass for MPTT models
@@ -264,7 +254,6 @@ class MPTTModelBase(ModelBase):
         For the weird cases when you need to add tree-ness to an *existing*
         class. For other cases you should subclass MPTTModel instead of calling this.
         """
-
         if not issubclass(cls, models.Model):
             raise ValueError(_("register() expects a Django model class argument"))
 
@@ -321,7 +310,7 @@ class MPTTModelBase(ModelBase):
                 bases.insert(0, MPTTModel)
                 cls.__bases__ = tuple(bases)
 
-            for parent_dict in cls._mptt_meta.__dict__['parents'].itervalues():
+            for parent_dict in cls._mptt_meta.parents.itervalues():
                 for key in (
                         'left_attr', 'right_attr', 'tree_id_attr', 'level_attr'):
                     field_name = parent_dict[key]
@@ -401,7 +390,9 @@ class MPTTModel(models.Model):
         super(MPTTModel, self).__init__(*args, **kwargs)
         self._mptt_meta.update_mptt_cached_fields(self)
 
-    def _mpttfield(self, fieldname):
+    def _mpttfield(self, fieldname, prefix=None):
+        if getattr(self._mptt_meta, '%s_attr' % fieldname) != self._mptt_meta.parents[prefix]['%s_attr' % fieldname]:
+            raise Exception, (self._mptt_meta.parents[prefix]['%s_attr' % fieldname], getattr(self._mptt_meta, '%s_attr' % fieldname), self._mptt_meta.__dict__)
         translated_fieldname = getattr(self._mptt_meta, '%s_attr' % fieldname)
         return getattr(self, translated_fieldname)
 
@@ -418,7 +409,7 @@ class MPTTModel(models.Model):
         If ``include_self`` is ``True``, the ``QuerySet`` will also
         include this model instance.
         """
-        if self.is_root_node():
+        if self.is_root_node(prefix=prefix):
             if not include_self:
                 return self._tree_manager.none()
             else:
@@ -441,7 +432,7 @@ class MPTTModel(models.Model):
         qs = self._tree_manager._mptt_filter(
             left__lte=left,
             right__gte=right,
-            tree_id=self._mpttfield('tree_id'),
+            tree_id=self._mpttfield('tree_id', prefix=prefix),
         )
 
         return qs.order_by(order_by)
@@ -491,7 +482,7 @@ class MPTTModel(models.Model):
             right -= 1
 
         return self._tree_manager._mptt_filter(
-            tree_id=self._mpttfield('tree_id'),
+            tree_id=self._mpttfield('tree_id', prefix=prefix),
             left__gte=left,
             left__lte=right
         )
@@ -500,11 +491,12 @@ class MPTTModel(models.Model):
         """
         Returns the number of descendants this model instance has.
         """
-        if self._mpttfield('right') is None:
+        if self._mpttfield('right', prefix=prefix) is None:
             # node not saved yet
             return 0
         else:
-            return (self._mpttfield('right') - self._mpttfield('left') - 1) / 2
+            return (self._mpttfield('right', prefix=prefix) -
+                self._mpttfield('left', prefix=prefix) - 1) / 2
 
     def get_leafnodes(self, include_self=False, prefix=None):
         """
@@ -526,16 +518,16 @@ class MPTTModel(models.Model):
         ``None`` if it doesn't have a next sibling.
         """
         qs = self._tree_manager.filter(**filters)
-        if self.is_root_node():
+        if self.is_root_node(prefix=prefix):
             qs = self._tree_manager._mptt_filter(qs,
                 parent__isnull=True,
-                tree_id__gt=self._mpttfield('tree_id'),
+                tree_id__gt=self._mpttfield('tree_id', prefix=prefix),
             )
         else:
             qs = self._tree_manager._mptt_filter(qs,
                 parent__id=getattr(self, '%s_id' %
                     self._mptt_meta.get_parent_attr(prefix=prefix)),
-                left__gt=self._mpttfield('right'),
+                left__gt=self._mpttfield('right', prefix=prefix),
             )
 
         siblings = qs[:1]
@@ -548,32 +540,32 @@ class MPTTModel(models.Model):
         """
         opts = self._mptt_meta
         qs = self._tree_manager.filter(**filters)
-        if self.is_root_node():
+        if self.is_root_node(prefix=prefix):
             qs = self._tree_manager._mptt_filter(qs,
                 parent__isnull=True,
-                tree_id__lt=self._mpttfield('tree_id'),
+                tree_id__lt=self._mpttfield('tree_id', prefix=prefix),
             )
             qs = qs.order_by('-%s' % opts.get_tree_id_attr(prefix=prefix))
         else:
             qs = self._tree_manager._mptt_filter(qs,
                 parent__id=getattr(self, '%s_id' %
                     opts.get_parent_attr(prefix=prefix)),
-                right__lt=self._mpttfield('left'),
+                right__lt=self._mpttfield('left', prefix=prefix),
             )
             qs = qs.order_by('-%s' % opts.get_right_attr(prefix=prefix))
 
         siblings = qs[:1]
         return siblings and siblings[0] or None
 
-    def get_root(self):
+    def get_root(self, prefix=None):
         """
         Returns the root node of this model instance's tree.
         """
-        if self.is_root_node() and type(self) == self._tree_manager.tree_model:
+        if self.is_root_node(prefix=prefix) and type(self) == self._tree_manager.tree_model:
             return self
 
         return self._tree_manager._mptt_filter(
-            tree_id=self._mpttfield('tree_id'),
+            tree_id=self._mpttfield('tree_id', prefix=prefix),
             parent__isnull=True
         ).get()
 
@@ -586,7 +578,7 @@ class MPTTModel(models.Model):
         If ``include_self`` is ``True``, the ``QuerySet`` will also
         include this model instance.
         """
-        if self.is_root_node():
+        if self.is_root_node(prefix=prefix):
             queryset = self._tree_manager._mptt_filter(parent__isnull=True)
         else:
             parent_id = getattr(self, '%s_id' %
@@ -609,12 +601,12 @@ class MPTTModel(models.Model):
         """
         self._tree_manager.insert_node(self, target, position, save, allow_existing_pk=allow_existing_pk)
 
-    def is_child_node(self):
+    def is_child_node(self, prefix=None):
         """
         Returns ``True`` if this model instance is a child node, ``False``
         otherwise.
         """
-        return not self.is_root_node()
+        return not self.is_root_node(prefix=prefix)
 
     def is_leaf_node(self):
         """
@@ -672,8 +664,8 @@ class MPTTModel(models.Model):
         """
         self._tree_manager.move_node(self, target, position)
 
-    def _is_saved(self, using=None):
-        if not self.pk or self._mpttfield('tree_id') is None:
+    def _is_saved(self, using=None, prefix=None):
+        if not self.pk or self._mpttfield('tree_id', prefix=prefix) is None:
             return False
         opts = self._meta
         if opts.pk.rel is None:
@@ -780,9 +772,10 @@ class MPTTModel(models.Model):
         opts.update_mptt_cached_fields(self)
 
     def delete(self, *args, **kwargs):
-        tree_width = (self._mpttfield('right') -
-                      self._mpttfield('left') + 1)
-        target_right = self._mpttfield('right')
-        tree_id = self._mpttfield('tree_id')
-        self._tree_manager._close_gap(tree_width, target_right, tree_id)
+        for prefix in self._mptt_meta.parents.iterkeys():
+            tree_width = (self._mpttfield('right', prefix=prefix) -
+                          self._mpttfield('left', prefix=prefix) + 1)
+            target_right = self._mpttfield('right', prefix=prefix)
+            tree_id = self._mpttfield('tree_id', prefix=prefix)
+            self._tree_manager._close_gap(tree_width, target_right, tree_id)
         super(MPTTModel, self).delete(*args, **kwargs)
