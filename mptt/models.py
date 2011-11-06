@@ -1,3 +1,4 @@
+from copy import deepcopy
 import operator
 import warnings
 
@@ -38,14 +39,15 @@ class MPTTOptions(object):
     def __init__(self, opts=None, **kwargs):
         # Override defaults with options provided
         if opts:
-            opts = opts.__dict__.copy()
+            opts = deepcopy(opts.__dict__)
         else:
             opts = {}
         opts.update(kwargs)
 
         if 'tree_manager_attr' in opts.iterkeys():
             warnings.warn(
-                _("`tree_manager_attr` is deprecated; just instantiate a TreeManager as a normal manager on your model"),
+                _('`tree_manager_attr` is deprecated; just instantiate a '
+                    'TreeManager as a normal manager on your model'),
                 DeprecationWarning
             )
 
@@ -65,12 +67,14 @@ class MPTTOptions(object):
                 else:
                     parent_dict.setdefault(name, self.__class__.parents[None][name])
 
-                # Normalize order_insertion_by to a list
+        # Normalize order_insertion_by to a list
+        for parent_dict in opts['parents'].itervalues():
+            for name, value in parent_dict.iteritems():
                 if name == 'order_insertion_by':
-                    if isinstance(parent_dict[name], basestring):
-                        parent_dict[name] = [parent_dict[name]]
-                    elif isinstance(parent_dict[name], tuple):
-                        parent_dict[name] = list(parent_dict[name])
+                    if isinstance(value, basestring):
+                        parent_dict[name] = [value]
+                    elif isinstance(value, tuple):
+                        parent_dict[name] = list(value)
                     elif parent_dict[name] is None:
                         parent_dict[name] = []
 
@@ -78,11 +82,12 @@ class MPTTOptions(object):
         self.__dict__.update(opts)
 
     def __iter__(self):
-        return iter([(k, v) for (k, v) in self.__dict__.items() if not k.startswith('_')])
+        return iter([(k, v) for (k, v) in self.__dict__.items()
+            if not k.startswith('_')])
 
     @property
     def order_insertion_by(self):
-        return self.get_parent_attr(prefix=None)
+        return self.get_order_insertion_by(prefix=None)
     @property
     def left_attr(self):
         return self.get_left_attr(prefix=None)
@@ -200,6 +205,9 @@ class MPTTOptions(object):
         if not parent_dict:
             raise ValueError, 'Unknown prefix `%s`.' % prefix
         return parent_dict
+
+    def get_order_insertion_by(self, prefix=None):
+        return self._get_parent_dict(prefix)['order_insertion_by']
 
     def get_parent_attr(self, prefix=None):
         return self._get_parent_dict(prefix)['parent_attr']
@@ -487,7 +495,7 @@ class MPTTModel(models.Model):
             left__lte=right
         )
 
-    def get_descendant_count(self):
+    def get_descendant_count(self, prefix=None):
         """
         Returns the number of descendants this model instance has.
         """
