@@ -52,11 +52,13 @@ class TreeManager(models.Manager):
         model (which we need). So it's done here instead, after field setup.
         """
 
+        self.prefix = prefix
+
         # Avoid calling "get_field_by_name()", which populates the related
         # model's cache and can cause circular imports in complex projects.
         # Instead, find the tree_id field using "get_fields_with_model()".
         [tree_field] = [fld for fld in model._meta.get_fields_with_model()
-            if fld[0].name == self.get_tree_id_attr(prefix=prefix)]
+            if fld[0].name == self.get_tree_id_attr()]
         if tree_field[1]:
             # tree_model is the model that contains the tree fields.
             # this is usually just the same as model, but not for derived models.
@@ -69,36 +71,36 @@ class TreeManager(models.Manager):
             # _base_manager is the treemanager on tree_model
             self._base_manager = self.tree_model._tree_manager
 
-    def get_parent_attr(self, prefix=None):
-        return self.model._mptt_meta.get_parent_attr(prefix=prefix)
+    def get_parent_attr(self):
+        return self.model._mptt_meta.get_parent_attr(prefix=self.prefix)
 
     @property
     def parent_attr(self):
         return self.get_parent_attr()
 
-    def get_left_attr(self, prefix=None):
-        return self.model._mptt_meta.get_left_attr(prefix=prefix)
+    def get_left_attr(self):
+        return self.model._mptt_meta.get_left_attr(prefix=self.prefix)
 
     @property
     def left_attr(self):
         return self.get_left_attr()
 
-    def get_right_attr(self, prefix=None):
-        return self.model._mptt_meta.get_right_attr(prefix=prefix)
+    def get_right_attr(self):
+        return self.model._mptt_meta.get_right_attr(prefix=self.prefix)
 
     @property
     def right_attr(self):
         return self.get_right_attr()
 
-    def get_tree_id_attr(self, prefix=None):
-        return self.model._mptt_meta.get_tree_id_attr(prefix=prefix)
+    def get_tree_id_attr(self):
+        return self.model._mptt_meta.get_tree_id_attr(prefix=self.prefix)
 
     @property
     def tree_id_attr(self):
         return self.get_tree_id_attr()
 
-    def get_level_attr(self, prefix=None):
-        return self.model._mptt_meta.get_level_attr(prefix=prefix)
+    def get_level_attr(self):
+        return self.model._mptt_meta.get_level_attr(prefix=self.prefix)
 
     @property
     def level_attr(self):
@@ -143,7 +145,7 @@ class TreeManager(models.Manager):
             return connections[router.db_for_write(node)]
 
     def add_related_count(self, queryset, rel_model, rel_field, count_attr,
-                          cumulative=False, prefix=None):
+                          cumulative=False):
         """
         Adds a related item count to a given ``QuerySet`` using its
         ``extra`` method, for a ``Model`` class which has a relation to
@@ -176,11 +178,11 @@ class TreeManager(models.Manager):
                 'mptt_table': qn(self.tree_model._meta.db_table),
                 'mptt_pk': qn(meta.pk.column),
                 'tree_id': qn(meta.get_field(self.get_tree_id_attr(
-                    prefix=prefix)).column),
+                    )).column),
                 'left': qn(meta.get_field(self.get_left_attr(
-                    prefix=prefix)).column),
+                    )).column),
                 'right': qn(meta.get_field(self.get_right_attr(
-                    prefix=prefix)).column),
+                    )).column),
             }
         else:
             subquery = COUNT_SUBQUERY % {
@@ -191,18 +193,18 @@ class TreeManager(models.Manager):
             }
         return queryset.extra(select={count_attr: subquery})
 
-    def get_query_set(self, prefix=None):
+    def get_query_set(self):
         """
         Returns a ``QuerySet`` which contains all tree items, ordered in
         such a way that that root nodes appear in tree id order and
         their subtrees appear in depth-first order.
         """
         return super(TreeManager, self).get_query_set().order_by(
-            self.get_tree_id_attr(prefix=prefix),
-                self.get_left_attr(prefix=prefix))
+            self.get_tree_id_attr(),
+                self.get_left_attr())
 
     def insert_node(self, node, target, position='last-child', save=False,
-            allow_existing_pk=False, prefix=None):
+            allow_existing_pk=False):
         """
         Sets up the tree state for ``node`` (which has not yet been
         inserted into in the database) so it will be positioned relative
@@ -227,18 +229,13 @@ class TreeManager(models.Manager):
             raise ValueError(_('Cannot insert a node which has already been saved.'))
 
         if target is None:
-            setattr(node, self.get_left_attr(
-                prefix=prefix), 1)
-            setattr(node, self.get_right_attr(
-                prefix=prefix), 2)
-            setattr(node, self.get_level_attr(
-                prefix=prefix), 0)
-            setattr(node, self.get_tree_id_attr(
-                prefix=prefix), self._get_next_tree_id(prefix=prefix))
-            setattr(node, self.get_parent_attr(
-                prefix=prefix), None)
-        elif target.is_root_node(prefix=prefix) and position in ['left', 'right']:
-            target_tree_id = getattr(target, self.get_tree_id_attr(prefix=prefix))
+            setattr(node, self.get_left_attr(), 1)
+            setattr(node, self.get_right_attr(), 2)
+            setattr(node, self.get_level_attr(), 0)
+            setattr(node, self.get_tree_id_attr(), self._get_next_tree_id())
+            setattr(node, self.get_parent_attr(), None)
+        elif target.is_root_node() and position in ['left', 'right']:
+            target_tree_id = getattr(target, self.get_tree_id_attr())
             if position == 'left':
                 tree_id = target_tree_id
                 space_target = target_tree_id - 1
@@ -246,52 +243,40 @@ class TreeManager(models.Manager):
                 tree_id = target_tree_id + 1
                 space_target = target_tree_id
 
-            self._create_tree_space(space_target, prefix=prefix)
+            self._create_tree_space(space_target, )
 
-            setattr(node, self.get_left_attr(
-                prefix=prefix), 1)
-            setattr(node, self.get_right_attr(
-                prefix=prefix), 2)
-            setattr(node, self.get_level_attr(
-                prefix=prefix), 0)
-            setattr(node, self.get_tree_id_attr(
-                prefix=prefix), tree_id)
-            setattr(node, self.get_parent_attr(
-                prefix=prefix), None)
+            setattr(node, self.get_left_attr(), 1)
+            setattr(node, self.get_right_attr(), 2)
+            setattr(node, self.get_level_attr(), 0)
+            setattr(node, self.get_tree_id_attr(), tree_id)
+            setattr(node, self.get_parent_attr(), None)
         else:
-            setattr(node, self.get_left_attr(
-                prefix=prefix), 0)
-            setattr(node, self.get_level_attr(
-                prefix=prefix), 0)
+            setattr(node, self.get_left_attr(), 0)
+            setattr(node, self.get_level_attr(), 0)
 
             space_target, level, left, parent, right_shift = \
                 self._calculate_inter_tree_move_values(node, target, position,
-                    prefix=prefix)
-            tree_id = getattr(parent, self.get_tree_id_attr(prefix=prefix))
+                    )
+            tree_id = getattr(parent, self.get_tree_id_attr())
 
             self._create_space(2, space_target, tree_id)
 
-            setattr(node, self.get_left_attr(
-                prefix=prefix), -left)
-            setattr(node, self.get_right_attr(
-                prefix=prefix), -left + 1)
-            setattr(node, self.get_level_attr(
-                prefix=prefix), -level)
-            setattr(node, self.get_tree_id_attr(
-                prefix=prefix), tree_id)
-            setattr(node, self.get_parent_attr(
-                prefix=prefix), parent)
+            setattr(node, self.get_left_attr(), -left)
+            setattr(node, self.get_right_attr(), -left + 1)
+            setattr(node, self.get_level_attr(), -level)
+            setattr(node, self.get_tree_id_attr(), tree_id)
+            setattr(node, self.get_parent_attr(), parent)
 
             if parent:
                 self._post_insert_update_cached_parent_right(parent, right_shift,
-                    prefix=prefix)
+                    )
 
         if save:
             node.save()
         return node
 
     def move_node(self, node, target,
-            position='last-child', prefix=None):
+            position='last-child'):
         """
         Moves ``node`` relative to a given ``target`` node as specified
         by ``position`` (when appropriate), by examining both nodes and
@@ -316,16 +301,15 @@ class TreeManager(models.Manager):
 
         if self._base_manager:
             return self._base_manager.move_node(node, target,
-                position=position, prefix=prefix)
+                position=position, )
 
         if target is None:
-            if node.is_child_node(prefix=prefix):
-                self._make_child_root_node(node, prefix=prefix)
-        elif target.is_root_node(prefix=prefix) and position in ['left', 'right']:
-            self._make_sibling_of_root_node(node, target, position,
-                prefix=prefix)
+            if node.is_child_node():
+                self._make_child_root_node(node, )
+        elif target.is_root_node() and position in ['left', 'right']:
+            self._make_sibling_of_root_node(node, target, position,)
         else:
-            if node.is_root_node(prefix=prefix):
+            if node.is_root_node():
                 self._move_root_node(node, target, position)
             else:
                 self._move_child_node(node, target, position)
@@ -369,17 +353,15 @@ class TreeManager(models.Manager):
             idx += 1
             self._rebuild_helper(pk, 1, idx)
 
-    def _post_insert_update_cached_parent_right(self, instance, right_shift,
-            prefix=None):
-        setattr(instance, self.get_right_attr(prefix=prefix),
-            getattr(instance, self.get_right_attr(
-                prefix=prefix)) + right_shift)
-        attr = '_%s_cache' % self.get_parent_attr(prefix=prefix)
+    def _post_insert_update_cached_parent_right(self, instance, right_shift):
+        setattr(instance, self.get_right_attr(),
+            getattr(instance, self.get_right_attr()) + right_shift)
+        attr = '_%s_cache' % self.get_parent_attr()
         if hasattr(instance, attr):
             parent = getattr(instance, attr)
             if parent:
                 self._post_insert_update_cached_parent_right(parent, right_shift,
-                    prefix=prefix)
+                    )
 
     def _rebuild_helper(self, pk, left, tree_id, level=0):
         opts = self.model._mptt_meta
@@ -403,17 +385,16 @@ class TreeManager(models.Manager):
 
         return right + 1
 
-    def _calculate_inter_tree_move_values(self, node, target, position,
-            prefix=None):
+    def _calculate_inter_tree_move_values(self, node, target, position):
         """
         Calculates values required when moving ``node`` relative to
         ``target`` as specified by ``position``.
         """
-        left = getattr(node, self.get_left_attr(prefix=prefix))
-        level = getattr(node, self.get_level_attr(prefix=prefix))
-        target_left = getattr(target, self.get_left_attr(prefix=prefix))
-        target_right = getattr(target, self.get_right_attr(prefix=prefix))
-        target_level = getattr(target, self.get_level_attr(prefix=prefix))
+        left = getattr(node, self.get_left_attr())
+        level = getattr(node, self.get_level_attr())
+        target_left = getattr(target, self.get_left_attr())
+        target_right = getattr(target, self.get_right_attr())
+        target_level = getattr(target, self.get_level_attr())
 
         if position == 'last-child' or position == 'first-child':
             if position == 'last-child':
@@ -428,7 +409,7 @@ class TreeManager(models.Manager):
             else:
                 space_target = target_right
             level_change = level - target_level
-            parent = getattr(target, self.get_parent_attr(prefix=prefix))
+            parent = getattr(target, self.get_parent_attr())
         else:
             raise ValueError(_('An invalid position was given: %s.') % position)
 
@@ -440,42 +421,42 @@ class TreeManager(models.Manager):
 
         return space_target, level_change, left_right_change, parent, right_shift
 
-    def _close_gap(self, size, target, tree_id, prefix=None):
+    def _close_gap(self, size, target, tree_id):
         """
         Closes a gap of a certain ``size`` after the given ``target``
         point in the tree identified by ``tree_id``.
         """
-        self._manage_space(-size, target, tree_id, prefix=prefix)
+        self._manage_space(-size, target, tree_id, )
 
-    def _create_space(self, size, target, tree_id, prefix=None):
+    def _create_space(self, size, target, tree_id):
         """
         Creates a space of a certain ``size`` after the given ``target``
         point in the tree identified by ``tree_id``.
         """
-        self._manage_space(size, target, tree_id, prefix=prefix)
+        self._manage_space(size, target, tree_id, )
 
-    def _create_tree_space(self, target_tree_id, prefix=None):
+    def _create_tree_space(self, target_tree_id):
         """
         Creates space for a new tree by incrementing all tree ids
         greater than ``target_tree_id``.
         """
         qs = self._mptt_filter(tree_id__gt=target_tree_id)
-        self._mptt_update(qs, tree_id=F(self.get_tree_id_attr(prefix=prefix)) + 1)
+        self._mptt_update(qs, tree_id=F(self.get_tree_id_attr()) + 1)
 
-    def _get_next_tree_id(self, prefix=None):
+    def _get_next_tree_id(self):
         """
         Determines the next largest unused tree id for the tree managed
         by this manager.
         """
         qs = self.get_query_set()
-        max_tree_id = qs.aggregate(Max(self.get_tree_id_attr(prefix=prefix))).values()[0]
+        max_tree_id = qs.aggregate(Max(self.get_tree_id_attr())).values()[0]
 
         max_tree_id = max_tree_id or 0
         return max_tree_id + 1
 
     def _inter_tree_move_and_close_gap(self, node, level_change,
             left_right_change, new_tree_id,
-            parent_pk=None, prefix=None):
+            parent_pk=None):
         """
         Removes ``node`` from its current tree, with the given set of
         changes being applied to ``node`` and its descendants, closing
@@ -515,17 +496,17 @@ class TreeManager(models.Manager):
                 ELSE %(parent)s END
         WHERE %(tree_id)s = %%s""" % {
             'table': qn(self.tree_model._meta.db_table),
-            'level': qn(opts.get_field(self.get_level_attr(prefix=prefix)).column),
-            'left': qn(opts.get_field(self.get_left_attr(prefix=prefix)).column),
-            'tree_id': qn(opts.get_field(self.get_tree_id_attr(prefix=prefix)).column),
-            'right': qn(opts.get_field(self.get_right_attr(prefix=prefix)).column),
-            'parent': qn(opts.get_field(self.get_parent_attr(prefix=prefix)).column),
+            'level': qn(opts.get_field(self.get_level_attr()).column),
+            'left': qn(opts.get_field(self.get_left_attr()).column),
+            'tree_id': qn(opts.get_field(self.get_tree_id_attr()).column),
+            'right': qn(opts.get_field(self.get_right_attr()).column),
+            'parent': qn(opts.get_field(self.get_parent_attr()).column),
             'pk': qn(opts.pk.column),
             'new_parent': parent_pk is None and 'NULL' or '%s',
         }
 
-        left = getattr(node, self.get_left_attr(prefix=prefix))
-        right = getattr(node, self.get_right_attr(prefix=prefix))
+        left = getattr(node, self.get_left_attr())
+        right = getattr(node, self.get_right_attr())
         gap_size = right - left + 1
         gap_target_left = left - 1
         params = [
@@ -536,7 +517,7 @@ class TreeManager(models.Manager):
             left, right, left_right_change,
             gap_target_left, gap_size,
             node.pk,
-            getattr(node, self.get_tree_id_attr(prefix=prefix))
+            getattr(node, self.get_tree_id_attr())
         ]
         if parent_pk is not None:
             params.insert(-1, parent_pk)
@@ -546,7 +527,7 @@ class TreeManager(models.Manager):
         cursor.execute(inter_tree_move_query, params)
 
     def _make_child_root_node(self, node,
-            new_tree_id=None, prefix=None):
+            new_tree_id=None):
         """
         Removes ``node`` from its tree, making it the root node of a new
         tree.
@@ -557,27 +538,26 @@ class TreeManager(models.Manager):
         ``node`` will be modified to reflect its new tree state in the
         database.
         """
-        left = getattr(node, self.get_left_attr(prefix=prefix))
-        right = getattr(node, self.get_right_attr(prefix=prefix))
-        level = getattr(node, self.get_level_attr(prefix=prefix))
+        left = getattr(node, self.get_left_attr())
+        right = getattr(node, self.get_right_attr())
+        level = getattr(node, self.get_level_attr())
         if not new_tree_id:
-            new_tree_id = self._get_next_tree_id(prefix=prefix)
+            new_tree_id = self._get_next_tree_id()
         left_right_change = left - 1
 
         self._inter_tree_move_and_close_gap(node, level, left_right_change,
-            new_tree_id, prefix=prefix)
+            new_tree_id, )
 
         # Update the node to be consistent with the updated
         # tree in the database.
-        setattr(node, self.get_left_attr(prefix=prefix), left - left_right_change)
-        setattr(node, self.get_right_attr(prefix=prefix), right - left_right_change)
-        setattr(node, self.get_level_attr(prefix=prefix), 0)
-        setattr(node, self.get_tree_id_attr(prefix=prefix), new_tree_id)
-        setattr(node, self.get_parent_attr(prefix=prefix), None)
-        node._mptt_cached_fields[self.get_parent_attr(prefix=prefix)] = None
+        setattr(node, self.get_left_attr(), left - left_right_change)
+        setattr(node, self.get_right_attr(), right - left_right_change)
+        setattr(node, self.get_level_attr(), 0)
+        setattr(node, self.get_tree_id_attr(), new_tree_id)
+        setattr(node, self.get_parent_attr(), None)
+        node._mptt_cached_fields[self.get_parent_attr()] = None
 
-    def _make_sibling_of_root_node(self, node, target, position,
-            prefix=None):
+    def _make_sibling_of_root_node(self, node, target, position):
         """
         Moves ``node``, making it a sibling of the given ``target`` root
         node as specified by ``position``.
@@ -594,10 +574,10 @@ class TreeManager(models.Manager):
             raise InvalidMove(_('A node may not be made a sibling of itself.'))
 
         opts = self.model._meta
-        tree_id = getattr(node, self.get_tree_id_attr(prefix=prefix))
-        target_tree_id = getattr(target, self.get_tree_id_attr(prefix=prefix))
+        tree_id = getattr(node, self.get_tree_id_attr())
+        target_tree_id = getattr(target, self.get_tree_id_attr())
 
-        if node.is_child_node(prefix=prefix):
+        if node.is_child_node():
             if position == 'left':
                 space_target = target_tree_id - 1
                 new_tree_id = target_tree_id
@@ -607,21 +587,21 @@ class TreeManager(models.Manager):
             else:
                 raise ValueError(_('An invalid position was given: %s.') % position)
 
-            self._create_tree_space(space_target, prefix=prefix)
+            self._create_tree_space(space_target, )
             if tree_id > space_target:
                 # The node's tree id has been incremented in the
                 # database - this change must be reflected in the node
                 # object for the method call below to operate on the
                 # correct tree.
-                setattr(node, self.get_tree_id_attr(prefix=prefix), tree_id + 1)
-            self._make_child_root_node(node, new_tree_id, prefix=prefix)
+                setattr(node, self.get_tree_id_attr(), tree_id + 1)
+            self._make_child_root_node(node, new_tree_id, )
         else:
             if position == 'left':
                 if target_tree_id > tree_id:
                     left_sibling = target.get_previous_sibling()
                     if node == left_sibling:
                         return
-                    new_tree_id = getattr(left_sibling, self.get_tree_id_attr(prefix=prefix))
+                    new_tree_id = getattr(left_sibling, self.get_tree_id_attr())
                     lower_bound, upper_bound = tree_id, new_tree_id
                     shift = -1
                 else:
@@ -637,7 +617,7 @@ class TreeManager(models.Manager):
                     right_sibling = target.get_next_sibling()
                     if node == right_sibling:
                         return
-                    new_tree_id = getattr(right_sibling, self.get_tree_id_attr(prefix=prefix))
+                    new_tree_id = getattr(right_sibling, self.get_tree_id_attr())
                     lower_bound, upper_bound = new_tree_id, tree_id
                     shift = 1
             else:
@@ -651,15 +631,15 @@ class TreeManager(models.Manager):
                 ELSE %(tree_id)s + %%s END
             WHERE %(tree_id)s >= %%s AND %(tree_id)s <= %%s""" % {
                 'table': qn(self.tree_model._meta.db_table),
-                'tree_id': qn(opts.get_field(self.get_tree_id_attr(prefix=prefix)).column),
+                'tree_id': qn(opts.get_field(self.get_tree_id_attr()).column),
             }
 
             cursor = self._get_connection(node).cursor()
             cursor.execute(root_sibling_query, [tree_id, new_tree_id, shift,
                                                 lower_bound, upper_bound])
-            setattr(node, self.get_tree_id_attr(prefix=prefix), new_tree_id)
+            setattr(node, self.get_tree_id_attr(), new_tree_id)
 
-    def _manage_space(self, size, target, tree_id, prefix=None):
+    def _manage_space(self, size, target, tree_id):
         """
         Manages spaces in the tree identified by ``tree_id`` by changing
         the values of the left and right columns by ``size`` after the
@@ -679,29 +659,29 @@ class TreeManager(models.Manager):
         WHERE %(tree_id)s = %%s
           AND (%(left)s > %%s OR %(right)s > %%s)""" % {
             'table': qn(self.tree_model._meta.db_table),
-            'left': qn(opts.get_field(self.get_left_attr(prefix=prefix)).column),
-            'right': qn(opts.get_field(self.get_right_attr(prefix=prefix)).column),
-            'tree_id': qn(opts.get_field(self.get_tree_id_attr(prefix=prefix)).column),
+            'left': qn(opts.get_field(self.get_left_attr()).column),
+            'right': qn(opts.get_field(self.get_right_attr()).column),
+            'tree_id': qn(opts.get_field(self.get_tree_id_attr()).column),
         }
         cursor = self._get_connection(self.model).cursor()
         cursor.execute(space_query, [target, size, target, size, tree_id,
                                      target, target])
 
-    def _move_child_node(self, node, target, position, prefix=None):
+    def _move_child_node(self, node, target, position):
         """
         Calls the appropriate method to move child node ``node``
         relative to the given ``target`` node as specified by
         ``position``.
         """
-        tree_id = getattr(node, self.get_tree_id_attr(prefix=prefix))
-        target_tree_id = getattr(target, self.get_tree_id_attr(prefix=prefix))
+        tree_id = getattr(node, self.get_tree_id_attr())
+        target_tree_id = getattr(target, self.get_tree_id_attr())
 
         if tree_id == target_tree_id:
             self._move_child_within_tree(node, target, position)
         else:
             self._move_child_to_new_tree(node, target, position)
 
-    def _move_child_to_new_tree(self, node, target, position, prefix=None):
+    def _move_child_to_new_tree(self, node, target, position):
         """
         Moves child node ``node`` to a different tree, inserting it
         relative to the given ``target`` node in the new tree as
@@ -710,14 +690,13 @@ class TreeManager(models.Manager):
         ``node`` will be modified to reflect its new tree state in the
         database.
         """
-        left = getattr(node, self.get_left_attr(prefix=prefix))
-        right = getattr(node, self.get_right_attr(prefix=prefix))
-        level = getattr(node, self.get_level_attr(prefix=prefix))
-        new_tree_id = getattr(target, self.get_tree_id_attr(prefix=prefix))
+        left = getattr(node, self.get_left_attr())
+        right = getattr(node, self.get_right_attr())
+        level = getattr(node, self.get_level_attr())
+        new_tree_id = getattr(target, self.get_tree_id_attr())
 
         space_target, level_change, left_right_change, parent, new_parent_right = \
-            self._calculate_inter_tree_move_values(node, target, position,
-                prefix=prefix)
+            self._calculate_inter_tree_move_values(node, target, position,)
 
         tree_width = right - left + 1
 
@@ -725,19 +704,19 @@ class TreeManager(models.Manager):
         self._create_space(tree_width, space_target, new_tree_id)
         # Move the subtree
         self._inter_tree_move_and_close_gap(node, level_change,
-            left_right_change, new_tree_id, parent.pk, prefix=prefix)
+            left_right_change, new_tree_id, parent.pk, )
 
         # Update the node to be consistent with the updated
         # tree in the database.
-        setattr(node, self.get_left_attr(prefix=prefix), left - left_right_change)
-        setattr(node, self.get_right_attr(prefix=prefix), right - left_right_change)
-        setattr(node, self.get_level_attr(prefix=prefix), level - level_change)
-        setattr(node, self.get_tree_id_attr(prefix=prefix), new_tree_id)
-        setattr(node, self.get_parent_attr(prefix=prefix), parent)
+        setattr(node, self.get_left_attr(), left - left_right_change)
+        setattr(node, self.get_right_attr(), right - left_right_change)
+        setattr(node, self.get_level_attr(), level - level_change)
+        setattr(node, self.get_tree_id_attr(), new_tree_id)
+        setattr(node, self.get_parent_attr(), parent)
 
-        node._mptt_cached_fields[self.get_parent_attr(prefix=prefix)] = parent.pk
+        node._mptt_cached_fields[self.get_parent_attr()] = parent.pk
 
-    def _move_child_within_tree(self, node, target, position, prefix=None):
+    def _move_child_within_tree(self, node, target, position):
         """
         Moves child node ``node`` within its current tree relative to
         the given ``target`` node as specified by ``position``.
@@ -745,14 +724,14 @@ class TreeManager(models.Manager):
         ``node`` will be modified to reflect its new tree state in the
         database.
         """
-        left = getattr(node, self.get_left_attr(prefix=prefix))
-        right = getattr(node, self.get_right_attr(prefix=prefix))
-        level = getattr(node, self.get_level_attr(prefix=prefix))
+        left = getattr(node, self.get_left_attr())
+        right = getattr(node, self.get_right_attr())
+        level = getattr(node, self.get_level_attr())
         width = right - left + 1
-        tree_id = getattr(node, self.get_tree_id_attr(prefix=prefix))
-        target_left = getattr(target, self.get_left_attr(prefix=prefix))
-        target_right = getattr(target, self.get_right_attr(prefix=prefix))
-        target_level = getattr(target, self.get_level_attr(prefix=prefix))
+        tree_id = getattr(node, self.get_tree_id_attr())
+        target_left = getattr(target, self.get_left_attr())
+        target_right = getattr(target, self.get_right_attr())
+        target_level = getattr(target, self.get_level_attr())
 
         if position == 'last-child' or position == 'first-child':
             if node == target:
@@ -795,7 +774,7 @@ class TreeManager(models.Manager):
                     new_left = target_right + 1
                     new_right = target_right + width
             level_change = level - target_level
-            parent = getattr(target, self.get_parent_attr(prefix=prefix))
+            parent = getattr(target, self.get_parent_attr())
         else:
             raise ValueError(_('An invalid position was given: %s.') % position)
 
@@ -835,12 +814,12 @@ class TreeManager(models.Manager):
                 ELSE %(parent)s END
         WHERE %(tree_id)s = %%s""" % {
             'table': qn(self.tree_model._meta.db_table),
-            'level': qn(opts.get_field(self.get_level_attr(prefix=prefix)).column),
-            'left': qn(opts.get_field(self.get_left_attr(prefix=prefix)).column),
-            'right': qn(opts.get_field(self.get_right_attr(prefix=prefix)).column),
-            'parent': qn(opts.get_field(self.get_parent_attr(prefix=prefix)).column),
+            'level': qn(opts.get_field(self.get_level_attr()).column),
+            'left': qn(opts.get_field(self.get_left_attr()).column),
+            'right': qn(opts.get_field(self.get_right_attr()).column),
+            'parent': qn(opts.get_field(self.get_parent_attr()).column),
             'pk': qn(opts.pk.column),
-            'tree_id': qn(opts.get_field(self.get_tree_id_attr(prefix=prefix)).column),
+            'tree_id': qn(opts.get_field(self.get_tree_id_attr()).column),
         }
 
         cursor = self._get_connection(node).cursor()
@@ -855,13 +834,13 @@ class TreeManager(models.Manager):
 
         # Update the node to be consistent with the updated
         # tree in the database.
-        setattr(node, self.get_left_attr(prefix=prefix), new_left)
-        setattr(node, self.get_right_attr(prefix=prefix), new_right)
-        setattr(node, self.get_level_attr(prefix=prefix), level - level_change)
-        setattr(node, self.get_parent_attr(prefix=prefix), parent)
-        node._mptt_cached_fields[self.get_parent_attr(prefix=prefix)] = parent.pk
+        setattr(node, self.get_left_attr(), new_left)
+        setattr(node, self.get_right_attr(), new_right)
+        setattr(node, self.get_level_attr(), level - level_change)
+        setattr(node, self.get_parent_attr(), parent)
+        node._mptt_cached_fields[self.get_parent_attr()] = parent.pk
 
-    def _move_root_node(self, node, target, position, prefix=None):
+    def _move_root_node(self, node, target, position):
         """
         Moves root node``node`` to a different tree, inserting it
         relative to the given ``target`` node as specified by
@@ -870,11 +849,11 @@ class TreeManager(models.Manager):
         ``node`` will be modified to reflect its new tree state in the
         database.
         """
-        left = getattr(node, self.get_left_attr(prefix=prefix))
-        right = getattr(node, self.get_right_attr(prefix=prefix))
-        level = getattr(node, self.get_level_attr(prefix=prefix))
-        tree_id = getattr(node, self.get_tree_id_attr(prefix=prefix))
-        new_tree_id = getattr(target, self.get_tree_id_attr(prefix=prefix))
+        left = getattr(node, self.get_left_attr())
+        right = getattr(node, self.get_right_attr())
+        level = getattr(node, self.get_level_attr())
+        tree_id = getattr(node, self.get_tree_id_attr())
+        new_tree_id = getattr(target, self.get_tree_id_attr())
         width = right - left + 1
 
         if node == target:
@@ -883,8 +862,7 @@ class TreeManager(models.Manager):
             raise InvalidMove(_('A node may not be made a child of any of its descendants.'))
 
         space_target, level_change, left_right_change, parent, right_shift = \
-            self._calculate_inter_tree_move_values(node, target, position,
-                prefix=prefix)
+            self._calculate_inter_tree_move_values(node, target, position,)
 
         # Create space for the tree which will be inserted
         self._create_space(width, space_target, new_tree_id)
@@ -904,11 +882,11 @@ class TreeManager(models.Manager):
         WHERE %(left)s >= %%s AND %(left)s <= %%s
           AND %(tree_id)s = %%s""" % {
             'table': qn(self.tree_model._meta.db_table),
-            'level': qn(opts.get_field(self.get_level_attr(prefix=prefix)).column),
-            'left': qn(opts.get_field(self.get_left_attr(prefix=prefix)).column),
-            'right': qn(opts.get_field(self.get_right_attr(prefix=prefix)).column),
-            'tree_id': qn(opts.get_field(self.get_tree_id_attr(prefix=prefix)).column),
-            'parent': qn(opts.get_field(self.get_parent_attr(prefix=prefix)).column),
+            'level': qn(opts.get_field(self.get_level_attr()).column),
+            'left': qn(opts.get_field(self.get_left_attr()).column),
+            'right': qn(opts.get_field(self.get_right_attr()).column),
+            'tree_id': qn(opts.get_field(self.get_tree_id_attr()).column),
+            'parent': qn(opts.get_field(self.get_parent_attr()).column),
             'pk': qn(opts.pk.column),
         }
 
@@ -919,9 +897,9 @@ class TreeManager(models.Manager):
 
         # Update the former root node to be consistent with the updated
         # tree in the database.
-        setattr(node, self.get_left_attr(prefix=prefix), left - left_right_change)
-        setattr(node, self.get_right_attr(prefix=prefix), right - left_right_change)
-        setattr(node, self.get_level_attr(prefix=prefix), level - level_change)
-        setattr(node, self.get_tree_id_attr(prefix=prefix), new_tree_id)
-        setattr(node, self.get_parent_attr(prefix=prefix), parent)
-        node._mptt_cached_fields[self.get_parent_attr(prefix=prefix)] = parent.pk
+        setattr(node, self.get_left_attr(), left - left_right_change)
+        setattr(node, self.get_right_attr(), right - left_right_change)
+        setattr(node, self.get_level_attr(), level - level_change)
+        setattr(node, self.get_tree_id_attr(), new_tree_id)
+        setattr(node, self.get_parent_attr(), parent)
+        node._mptt_cached_fields[self.get_parent_attr()] = parent.pk
