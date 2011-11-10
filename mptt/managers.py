@@ -69,7 +69,11 @@ class TreeManager(models.Manager):
         self._base_manager = None
         if self.tree_model is not model:
             # _base_manager is the treemanager on tree_model
-            self._base_manager = self.tree_model._tree_manager
+            if self.prefix is None:
+                tree_manager_name = '_tree_manager'
+            else:
+                tree_manager_name = '_%s_tree_manager' % self.prefix
+            self._base_manager = getattr(self.tree_model, tree_manager_name)
 
     def get_parent_attr(self):
         return self.model._mptt_meta.get_parent_attr(prefix=self.prefix)
