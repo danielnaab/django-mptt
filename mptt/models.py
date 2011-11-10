@@ -329,56 +329,65 @@ class MPTTModelBase(ModelBase):
                         field.contribute_to_class(cls, field_name)
 
             # Add a tree manager, if there isn't one already
-            if not abstract:
-                manager = getattr(cls, 'objects', None)
-                if manager is None:
-                    manager = cls._default_manager._copy_to_model(cls)
-                    manager.contribute_to_class(cls, 'objects')
-                elif manager.model != cls:
-                    # manager was inherited
-                    manager = manager._copy_to_model(cls)
-                    manager.contribute_to_class(cls, 'objects')
-                if hasattr(manager, 'init_from_model'):
-                    manager.init_from_model(cls)
+            for prefix, parent_dict in cls._mptt_meta.parents.iteritems():
+                if not abstract:
+                    if prefix is None:
+                        manager_name = 'objects'
+                    else:
+                        manager_name = '%s_objects' % prefix
+                    manager = getattr(cls, manager_name, None)
+                    if manager is None:
+                        manager = cls._default_manager._copy_to_model(cls)
+                        manager.contribute_to_class(cls, manager_name)
+                    elif manager.model != cls:
+                        # manager was inherited
+                        manager = manager._copy_to_model(cls)
+                        manager.contribute_to_class(cls, manager_name)
+                    if hasattr(manager, 'init_from_model'):
+                        manager.init_from_model(cls, prefix=prefix)
 
-                # make sure we have a tree manager somewhere
-                tree_manager = TreeManager()
-                tree_manager.contribute_to_class(cls, '_tree_manager')
-                tree_manager.init_from_model(cls)
+                    # make sure we have a tree manager somewhere
+                    tree_manager = TreeManager()
+                    if prefix is None:
+                        tree_manager_name = '_tree_manager'
+                    else:
+                        tree_manager_name = '_%s_tree_manager' % prefix
+                    tree_manager.contribute_to_class(cls, tree_manager_name)
+                    tree_manager.init_from_model(cls, prefix=prefix)
 
-                # avoid using ManagerDescriptor, so instances can refer to self._tree_manager
-                setattr(cls, '_tree_manager', tree_manager)
+                    # avoid using ManagerDescriptor, so instances can refer to self._tree_manager
+                    setattr(cls, tree_manager_name, tree_manager)
 
-                # for backwards compatibility, add .tree too (or whatever's in tree_manager_attr)
-                tree_manager_attr = cls._mptt_meta.tree_manager_attr
-                if tree_manager_attr != 'objects':
-                    another = getattr(cls, tree_manager_attr, None)
-                    if another is None:
-                        # wrap with a warning on first use
-                        from django.db.models.manager import ManagerDescriptor
+                    # for backwards compatibility, add .tree too (or whatever's in tree_manager_attr)
+                    tree_manager_attr = cls._mptt_meta.tree_manager_attr
+                    if tree_manager_attr != 'objects':
+                        another = getattr(cls, tree_manager_attr, None)
+                        if another is None:
+                            # wrap with a warning on first use
+                            from django.db.models.manager import ManagerDescriptor
 
-                        class _WarningDescriptor(ManagerDescriptor):
-                            def __init__(self, manager):
-                                self.manager = manager
-                                self.used = False
+                            class _WarningDescriptor(ManagerDescriptor):
+                                def __init__(self, manager):
+                                    self.manager = manager
+                                    self.used = False
 
-                            def __get__(self, instance, type=None):
-                                if instance != None:
-                                    raise AttributeError("Manager isn't accessible via %s instances" % type.__name__)
+                                def __get__(self, instance, type=None):
+                                    if instance != None:
+                                        raise AttributeError("Manager isn't accessible via %s instances" % type.__name__)
 
-                                if not self.used:
-                                    warnings.warn(
-                                        'Implicit manager %s.%s will be removed in django-mptt 0.6. '
-                                        ' Explicitly define a TreeManager() on your model to remove this warning.'
-                                        % (cls.__name__, tree_manager_attr),
-                                        DeprecationWarning
-                                    )
-                                    self.used = True
-                                return self.manager
+                                    if not self.used:
+                                        warnings.warn(
+                                            'Implicit manager %s.%s will be removed in django-mptt 0.6. '
+                                            ' Explicitly define a TreeManager() on your model to remove this warning.'
+                                            % (cls.__name__, tree_manager_attr),
+                                            DeprecationWarning
+                                        )
+                                        self.used = True
+                                    return self.manager
 
-                        setattr(cls, tree_manager_attr, _WarningDescriptor(manager))
-                    elif hasattr(another, 'init_from_model'):
-                        another.init_from_model(cls)
+                            setattr(cls, tree_manager_attr, _WarningDescriptor(manager))
+                        elif hasattr(another, 'init_from_model'):
+                            another.init_from_model(cls)
 
         return cls
 

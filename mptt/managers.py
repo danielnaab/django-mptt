@@ -526,8 +526,7 @@ class TreeManager(models.Manager):
 
         cursor.execute(inter_tree_move_query, params)
 
-    def _make_child_root_node(self, node,
-            new_tree_id=None):
+    def _make_child_root_node(self, node, new_tree_id=None):
         """
         Removes ``node`` from its tree, making it the root node of a new
         tree.
