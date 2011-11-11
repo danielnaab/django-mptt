@@ -279,8 +279,7 @@ class TreeManager(models.Manager):
             node.save()
         return node
 
-    def move_node(self, node, target,
-            position='last-child'):
+    def move_node(self, node, target, position='last-child'):
         """
         Moves ``node`` relative to a given ``target`` node as specified
         by ``position`` (when appropriate), by examining both nodes and

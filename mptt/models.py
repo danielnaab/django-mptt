@@ -124,7 +124,7 @@ class MPTTOptions(object):
         field = instance._meta.get_field(field_name)
         setattr(instance, field.attname, value)
 
-    def update_mptt_cached_fields(self, instance, prefix=None):
+    def update_mptt_cached_fields(self, instance):
         """
         Caches (in an instance._mptt_cached_fields dict) the original values of:
          - parent pk
@@ -134,11 +134,13 @@ class MPTTOptions(object):
         so that the MPTT fields need to be updated.
         """
         instance._mptt_cached_fields = {}
-        field_names = [self.get_parent_attr(prefix=prefix)]
-        if self.order_insertion_by:
-            field_names += self.order_insertion_by
-        for field_name in field_names:
-            instance._mptt_cached_fields[field_name] = self.get_raw_field_value(instance, field_name)
+        for prefix in self.parents.iterkeys():
+            field_names = [self.get_parent_attr(prefix=prefix)]
+            if self.get_order_insertion_by(prefix=prefix):
+                field_names += self.get_order_insertion_by(prefix=prefix)
+            for field_name in field_names:
+                instance._mptt_cached_fields[field_name] = \
+                    self.get_raw_field_value(instance, field_name)
 
     def insertion_target_filters(self, instance, order_insertion_by):
         """
@@ -176,21 +178,25 @@ class MPTTOptions(object):
         right_sibling = None
         # Optimisation - if the parent doesn't have descendants,
         # the node will always be its last child.
-        if parent is None or parent.get_descendant_count() > 0:
+        if parent is None or parent.get_descendant_count(prefix=prefix) > 0:
             opts = node._mptt_meta
-            order_by = opts.order_insertion_by[:]
+            order_by = opts.get_order_insertion_by(prefix=prefix)[:]
             filters = self.insertion_target_filters(node, order_by)
             if parent:
-                filters = filters & Q(**{opts.get_parent_attr(prefix=prefix): parent})
+                filters = filters & Q(**{
+                    opts.get_parent_attr(prefix=prefix): parent
+                })
                 # Fall back on tree ordering if multiple child nodes have
                 # the same values.
                 order_by.append(opts.get_left_attr(prefix=prefix))
             else:
-                filters = filters & Q(**{'%s__isnull' % opts.get_parent_attr(prefix=prefix): True})
+                filters = filters & Q(**{'%s__isnull' % opts.get_parent_attr(
+                    prefix=prefix): True})
                 # Fall back on tree id ordering if multiple root nodes have
                 # the same values.
                 order_by.append(opts.get_tree_id_attr(prefix=prefix))
-            queryset = node.__class__._tree_manager.filter(filters).order_by(*order_by)
+            queryset = node.get_tree_manager(prefix=prefix).filter(
+                filters).order_by(*order_by)
             if node.pk:
                 queryset = queryset.exclude(pk=node.pk)
             try:
@@ -408,10 +414,15 @@ class MPTTModel(models.Model):
         self._mptt_meta.update_mptt_cached_fields(self)
 
     def _mpttfield(self, fieldname, prefix=None):
-        if getattr(self._mptt_meta, '%s_attr' % fieldname) != self._mptt_meta.parents[prefix]['%s_attr' % fieldname]:
-            raise Exception, (self._mptt_meta.parents[prefix]['%s_attr' % fieldname], getattr(self._mptt_meta, '%s_attr' % fieldname), self._mptt_meta.__dict__)
-        translated_fieldname = getattr(self._mptt_meta, '%s_attr' % fieldname)
+        translated_fieldname = self._mptt_meta.parents[prefix]['%s_attr' % fieldname]
         return getattr(self, translated_fieldname)
+
+    def get_tree_manager(self, prefix=None):
+        if prefix is None:
+            tree_manager_name = '_tree_manager'
+        else:
+            tree_manager_name = '_%s_tree_manager' % prefix
+        return getattr(self, tree_manager_name)
 
     def get_ancestors(self, ascending=False, include_self=False, prefix=None):
         """
@@ -428,10 +439,10 @@ class MPTTModel(models.Model):
         """
         if self.is_root_node(prefix=prefix):
             if not include_self:
-                return self._tree_manager.none()
+                return self.get_tree_manager(prefix=prefix).none()
             else:
                 # Filter on pk for efficiency.
-                return self._tree_manager.filter(pk=self.pk)
+                return self.get_tree_manager(prefix=prefix).filter(pk=self.pk)
 
         opts = self._mptt_meta
 
@@ -446,7 +457,7 @@ class MPTTModel(models.Model):
             left -= 1
             right += 1
 
-        qs = self._tree_manager._mptt_filter(
+        qs = self.get_tree_manager(prefix=prefix)._mptt_filter(
             left__lte=left,
             right__gte=right,
             tree_id=self._mpttfield('tree_id', prefix=prefix),
@@ -454,7 +465,7 @@ class MPTTModel(models.Model):
 
         return qs.order_by(order_by)
 
-    def get_children(self):
+    def get_children(self, prefix=None):
         """
         Returns a ``QuerySet`` containing the immediate children of this
         model instance, in tree order.
@@ -471,10 +482,10 @@ class MPTTModel(models.Model):
         if hasattr(self, '_cached_children'):
             return self._cached_children
         else:
-            if self.is_leaf_node():
-                return self._tree_manager.none()
+            if self.is_leaf_node(prefix=prefix):
+                return self.get_tree_manager(prefix=prefix).none()
 
-            return self._tree_manager._mptt_filter(parent=self)
+            return self.get_tree_manager(prefix=prefix)._mptt_filter(parent=self)
 
     def get_descendants(self, include_self=False, prefix=None):
         """
@@ -484,11 +495,11 @@ class MPTTModel(models.Model):
         If ``include_self`` is ``True``, the ``QuerySet`` will also
         include this model instance.
         """
-        if self.is_leaf_node():
+        if self.is_leaf_node(prefix=prefix):
             if not include_self:
-                return self._tree_manager.none()
+                return self.get_tree_manager(prefix=prefix).none()
             else:
-                return self._tree_manager.filter(pk=self.pk)
+                return self.get_tree_manager(prefix=prefix).filter(pk=self.pk)
 
         opts = self._mptt_meta
         left = getattr(self, opts.get_left_attr(prefix=prefix))
@@ -498,7 +509,7 @@ class MPTTModel(models.Model):
             left += 1
             right -= 1
 
-        return self._tree_manager._mptt_filter(
+        return self.get_tree_manager(prefix=prefix)._mptt_filter(
             tree_id=self._mpttfield('tree_id', prefix=prefix),
             left__gte=left,
             left__lte=right
@@ -525,7 +536,7 @@ class MPTTModel(models.Model):
         """
         descendants = self.get_descendants(include_self=include_self)
 
-        return self._tree_manager._mptt_filter(descendants,
+        return self.get_tree_manager(prefix=prefix)._mptt_filter(descendants,
             left=(models.F(self._mptt_meta.get_right_attr(prefix=prefix)) - 1)
         )
 
@@ -534,14 +545,14 @@ class MPTTModel(models.Model):
         Returns this model instance's next sibling in the tree, or
         ``None`` if it doesn't have a next sibling.
         """
-        qs = self._tree_manager.filter(**filters)
+        qs = self.get_tree_manager(prefix=prefix).filter(**filters)
         if self.is_root_node(prefix=prefix):
-            qs = self._tree_manager._mptt_filter(qs,
+            qs = self.get_tree_manager(prefix=prefix)._mptt_filter(qs,
                 parent__isnull=True,
                 tree_id__gt=self._mpttfield('tree_id', prefix=prefix),
             )
         else:
-            qs = self._tree_manager._mptt_filter(qs,
+            qs = self.get_tree_manager(prefix=prefix)._mptt_filter(qs,
                 parent__id=getattr(self, '%s_id' %
                     self._mptt_meta.get_parent_attr(prefix=prefix)),
                 left__gt=self._mpttfield('right', prefix=prefix),
@@ -556,15 +567,15 @@ class MPTTModel(models.Model):
         ``None`` if it doesn't have a previous sibling.
         """
         opts = self._mptt_meta
-        qs = self._tree_manager.filter(**filters)
+        qs = self.get_tree_manager(prefix=prefix).filter(**filters)
         if self.is_root_node(prefix=prefix):
-            qs = self._tree_manager._mptt_filter(qs,
+            qs = self.get_tree_manager(prefix=prefix)._mptt_filter(qs,
                 parent__isnull=True,
                 tree_id__lt=self._mpttfield('tree_id', prefix=prefix),
             )
             qs = qs.order_by('-%s' % opts.get_tree_id_attr(prefix=prefix))
         else:
-            qs = self._tree_manager._mptt_filter(qs,
+            qs = self.get_tree_manager(prefix=prefix)._mptt_filter(qs,
                 parent__id=getattr(self, '%s_id' %
                     opts.get_parent_attr(prefix=prefix)),
                 right__lt=self._mpttfield('left', prefix=prefix),
@@ -578,10 +589,11 @@ class MPTTModel(models.Model):
         """
         Returns the root node of this model instance's tree.
         """
-        if self.is_root_node(prefix=prefix) and type(self) == self._tree_manager.tree_model:
+        if (self.is_root_node(prefix=prefix) and
+                type(self) == self.get_tree_manager(prefix=prefix).tree_model):
             return self
 
-        return self._tree_manager._mptt_filter(
+        return self.get_tree_manager(prefix=prefix)._mptt_filter(
             tree_id=self._mpttfield('tree_id', prefix=prefix),
             parent__isnull=True
         ).get()
@@ -596,11 +608,11 @@ class MPTTModel(models.Model):
         include this model instance.
         """
         if self.is_root_node(prefix=prefix):
-            queryset = self._tree_manager._mptt_filter(parent__isnull=True)
+            queryset = self.get_tree_manager(prefix=prefix)._mptt_filter(parent__isnull=True)
         else:
             parent_id = getattr(self, '%s_id' %
                 self._mptt_meta.get_parent_attr(prefix=prefix))
-            queryset = self._tree_manager._mptt_filter(parent__id=parent_id)
+            queryset = self.get_tree_manager(prefix=prefix)._mptt_filter(parent__id=parent_id)
         if not include_self:
             queryset = queryset.exclude(pk=self.pk)
         return queryset
@@ -611,12 +623,14 @@ class MPTTModel(models.Model):
         """
         return getattr(self, self._mptt_meta.get_level_attr(prefix=prefix))
 
-    def insert_at(self, target, position='first-child', save=False, allow_existing_pk=False):
+    def insert_at(self, target, position='first-child',
+            save=False, allow_existing_pk=False, prefix=None):
         """
         Convenience method for calling ``TreeManager.insert_node`` with this
         model instance.
         """
-        self._tree_manager.insert_node(self, target, position, save, allow_existing_pk=allow_existing_pk)
+        self.get_tree_manager(prefix=prefix).insert_node(
+            self, target, position, save, allow_existing_pk=allow_existing_pk)
 
     def is_child_node(self, prefix=None):
         """
@@ -625,12 +639,12 @@ class MPTTModel(models.Model):
         """
         return not self.is_root_node(prefix=prefix)
 
-    def is_leaf_node(self):
+    def is_leaf_node(self, prefix=None):
         """
         Returns ``True`` if this model instance is a leaf node (it has no
         children), ``False`` otherwise.
         """
-        return not self.get_descendant_count()
+        return not self.get_descendant_count(prefix=prefix)
 
     def is_root_node(self, prefix=None):
         """
@@ -661,7 +675,7 @@ class MPTTModel(models.Model):
             return (left > getattr(other, opts.get_left_attr(prefix=prefix))
                 and right < getattr(other, opts.get_right_attr(prefix=prefix)))
 
-    def is_ancestor_of(self, other, include_self=False):
+    def is_ancestor_of(self, other, include_self=False, prefix=None):
         """
         Returns ``True`` if this model is an ancestor of the given node,
         ``False`` otherwise.
@@ -669,9 +683,9 @@ class MPTTModel(models.Model):
         """
         if include_self and other.pk == self.pk:
             return True
-        return other.is_descendant_of(self)
+        return other.is_descendant_of(self, prefix=prefix)
 
-    def move_to(self, target, position='first-child'):
+    def move_to(self, target, position='first-child', prefix=None):
         """
         Convenience method for calling ``TreeManager.move_node`` with this
         model instance.
@@ -679,7 +693,7 @@ class MPTTModel(models.Model):
         NOTE: This is a low-level method; it does NOT respect ``MPTTMeta.order_insertion_by``.
         In most cases you should just move the node yourself by setting node.parent.
         """
-        self._tree_manager.move_node(self, target, position)
+        self.get_tree_manager(prefix=prefix).move_node(self, target, position)
 
     def _is_saved(self, using=None, prefix=None):
         if not self.pk or self._mpttfield('tree_id', prefix=prefix) is None:
@@ -696,71 +710,6 @@ class MPTTModel(models.Model):
                     manager = manager.using(using)
                 self._mptt_saved = _exists(manager.filter(pk=self.pk))
             return self._mptt_saved
-
-    def _save_parent(self, opts, **kwargs):
-        parent_id = opts.get_raw_field_value(self, opts.parent_attr)
-
-        # determine whether this instance is already in the db
-        force_update = kwargs.get('force_update', False)
-        force_insert = kwargs.get('force_insert', False)
-        if force_update or (not force_insert and self._is_saved(using=kwargs.get('using', None))):
-            # it already exists, so do a move
-            old_parent_id = self._mptt_cached_fields[opts.parent_attr]
-            same_order = old_parent_id == parent_id
-            if same_order and len(self._mptt_cached_fields) > 1:
-                for field_name, old_value in self._mptt_cached_fields.items():
-                    if old_value != opts.get_raw_field_value(self, field_name):
-                        same_order = False
-                        break
-
-            if not same_order:
-                opts.set_raw_field_value(self, opts.parent_attr, old_parent_id)
-                try:
-                    right_sibling = None
-                    if opts.order_insertion_by:
-                        right_sibling = opts.get_ordered_insertion_target(self, getattr(self, opts.parent_attr))
-
-                    if right_sibling:
-                        self.move_to(right_sibling, 'left')
-                    else:
-                        # Default movement
-                        if parent_id is None:
-                            root_nodes = self._tree_manager.root_nodes()
-                            try:
-                                rightmost_sibling = root_nodes.exclude(pk=self.pk).order_by('-%s' % opts.tree_id_attr)[0]
-                                self.move_to(rightmost_sibling, position='right')
-                            except IndexError:
-                                pass
-                        else:
-                            parent = getattr(self, opts.parent_attr)
-                            self.move_to(parent, position='last-child')
-                finally:
-                    # Make sure the new parent is always
-                    # restored on the way out in case of errors.
-                    opts.set_raw_field_value(self, opts.parent_attr, parent_id)
-        else:
-            # new node, do an insert
-            if (getattr(self, opts.left_attr) and getattr(self, opts.right_attr)):
-                # This node has already been set up for insertion.
-                pass
-            else:
-                parent = getattr(self, opts.parent_attr)
-
-                right_sibling = None
-                if opts.order_insertion_by:
-                    right_sibling = opts.get_ordered_insertion_target(self, parent)
-
-                if right_sibling:
-                    self.insert_at(right_sibling, 'left', allow_existing_pk=True)
-
-                    if parent:
-                        # since we didn't insert into parent, we have to update parent.rght
-                        # here instead of in TreeManager.insert_node()
-                        right_shift = 2 * (self.get_descendant_count() + 1)
-                        self._tree_manager._post_insert_update_cached_parent_right(parent, right_shift)
-                else:
-                    # Default insertion
-                    self.insert_at(parent, position='last-child', allow_existing_pk=True)
 
     def save(self, *args, **kwargs):
         """
@@ -780,9 +729,84 @@ class MPTTModel(models.Model):
         tree option set, the node will be inserted or moved to the
         appropriate position to maintain ordering by the specified field.
         """
-        for opts in self._mptt_meta.parents.itervalues():
-            opts = self._mptt_meta
-            self._save_parent(opts, **kwargs)
+        force_update = kwargs.get('force_update', False)
+        force_insert = kwargs.get('force_insert', False)
+        using = kwargs.get('using', None)
+        opts = self._mptt_meta
+        for prefix in opts.parents.iterkeys():
+            parent_id = opts.get_raw_field_value(self, opts.get_parent_attr(prefix=prefix))
+            tree_manager = self.get_tree_manager(prefix=prefix)
+
+            # determine whether this instance is already in the db
+            if force_update or (not force_insert and self._is_saved(
+                    using=using, prefix=prefix)):
+                # it already exists, so do a move
+                old_parent_id = self._mptt_cached_fields[opts.get_parent_attr(prefix=prefix)]
+                same_order = old_parent_id == parent_id
+                if same_order and len(self._mptt_cached_fields) > 1:
+                    for field_name, old_value in self._mptt_cached_fields.items():
+                        if old_value != opts.get_raw_field_value(self, field_name):
+                            same_order = False
+                            break
+
+                if not same_order:
+                    opts.set_raw_field_value(self, opts.get_parent_attr(
+                        prefix=prefix), old_parent_id)
+                    try:
+                        right_sibling = None
+                        if opts.get_order_insertion_by(prefix=prefix):
+                            right_sibling = opts.get_ordered_insertion_target(
+                                self, getattr(self, opts.get_parent_attr(prefix=prefix)))
+
+                        if right_sibling:
+                            self.move_to(right_sibling, 'left', prefix=prefix)
+                        else:
+                            # Default movement
+                            if parent_id is None:
+                                root_nodes = tree_manager.root_nodes()
+                                try:
+                                    rightmost_sibling = root_nodes.exclude(
+                                        pk=self.pk).order_by('-%s' %
+                                        opts.get_tree_id_attr(prefix=prefix))[0]
+                                    self.move_to(rightmost_sibling,
+                                        position='right', prefix=prefix)
+                                except IndexError:
+                                    pass
+                            else:
+                                parent = getattr(self, opts.get_parent_attr(prefix=prefix))
+                                self.move_to(parent, position='last-child', prefix=prefix)
+                    finally:
+                        # Make sure the new parent is always
+                        # restored on the way out in case of errors.
+                        opts.set_raw_field_value(self, opts.get_parent_attr(prefix=prefix), parent_id)
+            else:
+                # new node, do an insert
+                if (getattr(self, opts.get_left_attr(prefix=prefix)) and
+                        getattr(self, opts.get_right_attr(prefix=prefix))):
+                    # This node has already been set up for insertion.
+                    pass
+                else:
+                    parent = getattr(self, opts.get_parent_attr(prefix=prefix))
+
+                    right_sibling = None
+                    if opts.get_order_insertion_by(prefix=prefix):
+                        right_sibling = opts.get_ordered_insertion_target(
+                            self, parent, prefix=prefix)
+
+                    if right_sibling:
+                        self.insert_at(right_sibling, 'left',
+                            allow_existing_pk=True, prefix=prefix)
+
+                        if parent:
+                            # since we didn't insert into parent, we have to update parent.rght
+                            # here instead of in TreeManager.insert_node()
+                            right_shift = 2 * (
+                                self.get_descendant_count(prefix=prefix) + 1)
+                            tree_manager._post_insert_update_cached_parent_right(
+                                parent, right_shift)
+                    else:
+                        # Default insertion
+                        self.insert_at(parent, position='last-child', allow_existing_pk=True)
 
         super(MPTTModel, self).save(*args, **kwargs)
         self._mptt_saved = True
@@ -794,5 +818,5 @@ class MPTTModel(models.Model):
                           self._mpttfield('left', prefix=prefix) + 1)
             target_right = self._mpttfield('right', prefix=prefix)
             tree_id = self._mpttfield('tree_id', prefix=prefix)
-            self._tree_manager._close_gap(tree_width, target_right, tree_id)
+            self.get_tree_manager(prefix=prefix)._close_gap(tree_width, target_right, tree_id)
         super(MPTTModel, self).delete(*args, **kwargs)
