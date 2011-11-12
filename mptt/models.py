@@ -806,7 +806,8 @@ class MPTTModel(models.Model):
                                 parent, right_shift)
                     else:
                         # Default insertion
-                        self.insert_at(parent, position='last-child', allow_existing_pk=True)
+                        self.insert_at(parent, position='last-child',
+                            allow_existing_pk=True, prefix=prefix)
 
         super(MPTTModel, self).save(*args, **kwargs)
         self._mptt_saved = True
